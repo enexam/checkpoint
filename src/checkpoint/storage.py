@@ -25,7 +25,12 @@ def _resolve_db_path(db_path: str | Path | None) -> Path:
 
 
 def init_db(db_path: str | Path | None = None) -> None:
-    """Create the DB file and markers table idempotently."""
+    """Create the DB file and markers table idempotently.
+
+    Also adds `begin_timestamp_ms` and `duration_hint_ms` columns if missing
+    (migration for databases created before Phase 3), and backfills any rows
+    that have NULL in those columns.
+    """
     path = _resolve_db_path(db_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(path)
@@ -44,6 +49,19 @@ def init_db(db_path: str | Path | None = None) -> None:
             CREATE INDEX IF NOT EXISTS idx_markers_category ON markers (category);
         """)
         con.commit()
+        # Migration: add new columns if they do not exist yet.
+        for col in ("begin_timestamp_ms INTEGER", "duration_hint_ms INTEGER"):
+            try:
+                con.execute(f"ALTER TABLE markers ADD COLUMN {col}")
+                con.commit()
+            except sqlite3.OperationalError:
+                pass  # column already exists
+        # Backfill rows created before this migration.
+        con.execute(
+            "UPDATE markers SET begin_timestamp_ms = timestamp_ms, duration_hint_ms = 0"
+            " WHERE begin_timestamp_ms IS NULL"
+        )
+        con.commit()
     finally:
         con.close()
 
@@ -53,6 +71,8 @@ def append_marker(
     timestamp_ms: int,
     description: str,
     category: str,
+    begin_timestamp_ms: int,
+    duration_hint_ms: int,
     db_path: str | Path | None = None,
 ) -> None:
     """Insert one marker row into the database."""
@@ -61,9 +81,19 @@ def append_marker(
     con = sqlite3.connect(path)
     try:
         con.execute(
-            "INSERT INTO markers (file_path, timestamp_ms, timestamp_hms, description, category)"
-            " VALUES (?, ?, ?, ?, ?)",
-            (file_path, timestamp_ms, _ms_to_hms(timestamp_ms), description, category),
+            "INSERT INTO markers"
+            " (file_path, timestamp_ms, timestamp_hms, description, category,"
+            "  begin_timestamp_ms, duration_hint_ms)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                file_path,
+                timestamp_ms,
+                _ms_to_hms(timestamp_ms),
+                description,
+                category,
+                begin_timestamp_ms,
+                duration_hint_ms,
+            ),
         )
         con.commit()
     finally:
@@ -122,6 +152,35 @@ def list_categories(db_path: str | Path | None = None) -> list[str]:
             "SELECT DISTINCT category FROM markers ORDER BY category"
         ).fetchall()
         return [row[0] for row in rows]
+    finally:
+        con.close()
+
+
+def update_marker_boundaries(
+    marker_id: int,
+    begin_ms: int,
+    end_ms: int,
+    db_path: str | Path | None = None,
+) -> dict | None:
+    """Update begin_timestamp_ms, timestamp_ms, and timestamp_hms for one marker.
+
+    Returns the updated row dict, or None if marker_id does not exist.
+    """
+    path = _resolve_db_path(db_path)
+    con = sqlite3.connect(path)
+    con.row_factory = sqlite3.Row
+    try:
+        cur = con.execute(
+            "UPDATE markers"
+            " SET begin_timestamp_ms = ?, timestamp_ms = ?, timestamp_hms = ?"
+            " WHERE id = ?",
+            (begin_ms, end_ms, _ms_to_hms(end_ms), marker_id),
+        )
+        con.commit()
+        if cur.rowcount == 0:
+            return None
+        row = con.execute("SELECT * FROM markers WHERE id = ?", (marker_id,)).fetchone()
+        return dict(row)
     finally:
         con.close()
 

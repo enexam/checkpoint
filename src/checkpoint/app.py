@@ -126,7 +126,7 @@ def _make_hotkey_callback(
             return
         description, category = result
         logging.info("marker: %r [%s] @ %d ms", description, category, snapshot["timestamp_ms"])
-        append_marker_fn(snapshot["file_path"], snapshot["timestamp_ms"], description, category)
+        append_marker_fn(snapshot["file_path"], snapshot["timestamp_ms"], description, category, snapshot["timestamp_ms"], 0)
         if category and category not in categories:
             categories.append(category)
             save_cats_fn(categories)

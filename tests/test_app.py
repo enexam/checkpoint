@@ -90,7 +90,7 @@ def test_hotkey_callback_appends_marker_on_happy_path():
     cb = _make_hotkey_callback(obs, categories, show_popup, append_marker, save_cats)
     cb()
 
-    append_marker.assert_called_once_with("C:/rec.mkv", 5000, "great moment", "gameplay")
+    append_marker.assert_called_once_with("C:/rec.mkv", 5000, "great moment", "gameplay", 5000, 0)
 
 
 def test_hotkey_callback_appends_new_category_and_saves():
