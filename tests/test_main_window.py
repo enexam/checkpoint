@@ -350,6 +350,31 @@ def test_add_blank_category_is_ignored(tk_root, tmp_path):
     assert not cats_path.exists()
 
 
+def test_add_category_updates_live_list(tk_root, tmp_path):
+    """Adding a category via the UI also appends it to the live categories list."""
+    from checkpoint.main_window import open_main_window
+
+    live = ["existing"]
+    open_main_window(
+        tk_root, _default_config(), _make_listener(), _make_obs(),
+        categories=live,
+        categories_path=tmp_path / "categories.json",
+        config_path=tmp_path / "config.json",
+        db_path=tmp_path / "markers.db",
+    )
+    tk_root.update()
+
+    win = [w for w in tk_root.winfo_children() if isinstance(w, tk.Toplevel)][0]
+    from tkinter import ttk
+    entries = [w for w in _find_widgets(win, tk.Entry) if not isinstance(w, (tk.Spinbox, ttk.Spinbox, ttk.Combobox))]
+    cat_entry = entries[-1]
+    cat_entry.delete(0, "end")
+    cat_entry.insert(0, "newcat")
+    _click_button(win, "Add")
+
+    assert "newcat" in live
+
+
 # ---------------------------------------------------------------------------
 # Widget traversal helpers
 # ---------------------------------------------------------------------------

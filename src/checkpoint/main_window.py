@@ -18,6 +18,7 @@ def open_main_window(
     config: dict,
     hotkey_listener: Any,
     obs_client: Any,
+    categories: list[str] | None = None,
     categories_path: Path | None = None,
     config_path: Path | None = None,
     db_path: Path | None = None,
@@ -74,6 +75,7 @@ def open_main_window(
         config,
         hotkey_listener,
         obs_client,
+        live_categories=categories,
         categories_path=categories_path,
         config_path=config_path,
     )
@@ -89,6 +91,7 @@ def _build_settings_tab(
     config: dict,
     hotkey_listener: Any,
     obs_client: Any,
+    live_categories: list[str] | None,
     categories_path: Path | None,
     config_path: Path | None,
 ) -> None:
@@ -198,6 +201,8 @@ def _build_settings_tab(
             return
         current_cats.append(name)
         save_categories(current_cats, cats_path=categories_path)
+        if live_categories is not None and name not in live_categories:
+            live_categories.append(name)
         _reload_listbox()
         new_cat_var.set("")
 

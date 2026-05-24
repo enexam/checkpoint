@@ -176,7 +176,7 @@ def main() -> None:
     listener.start()
 
     def _open(icon: pystray.Icon, _item: object) -> None:
-        root.after(0, lambda: open_main_window(root, config, listener, obs))
+        root.after(0, lambda: open_main_window(root, config, listener, obs, categories=categories))
 
     def _quit(icon: pystray.Icon, _item: object) -> None:
         icon.stop()
