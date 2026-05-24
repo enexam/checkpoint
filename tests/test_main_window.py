@@ -1,6 +1,8 @@
-"""Tests for main_window.py - Settings tab (task 3)."""
+"""Tests for main_window.py - Settings tab (task 3) and Markers tab (task 4)."""
+import csv
 import json
 import tkinter as tk
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -48,7 +50,7 @@ def _default_config() -> dict:
 def test_open_creates_toplevel(tk_root, tmp_path):
     """open_main_window creates a Toplevel child of root."""
     from checkpoint.main_window import open_main_window
-    open_main_window(tk_root, _default_config(), _make_listener(), _make_obs(), config_path=tmp_path / "config.json")
+    open_main_window(tk_root, _default_config(), _make_listener(), _make_obs(), config_path=tmp_path / "config.json", db_path=tmp_path / "markers.db")
     children = [w for w in tk_root.winfo_children() if isinstance(w, tk.Toplevel)]
     assert len(children) == 1
 
@@ -57,8 +59,9 @@ def test_open_twice_raises_existing(tk_root, tmp_path):
     """Calling open_main_window a second time does not open a second Toplevel."""
     from checkpoint.main_window import open_main_window
     config_path = tmp_path / "config.json"
-    open_main_window(tk_root, _default_config(), _make_listener(), _make_obs(), config_path=config_path)
-    open_main_window(tk_root, _default_config(), _make_listener(), _make_obs(), config_path=config_path)
+    db_path = tmp_path / "markers.db"
+    open_main_window(tk_root, _default_config(), _make_listener(), _make_obs(), config_path=config_path, db_path=db_path)
+    open_main_window(tk_root, _default_config(), _make_listener(), _make_obs(), config_path=config_path, db_path=db_path)
     children = [w for w in tk_root.winfo_children() if isinstance(w, tk.Toplevel)]
     assert len(children) == 1
 
@@ -72,7 +75,7 @@ def test_settings_tab_shows_current_config(tk_root, tmp_path):
         "obs_port": 4444,
         "obs_password": "secret",
     }
-    open_main_window(tk_root, config, _make_listener(), _make_obs(), config_path=tmp_path / "config.json")
+    open_main_window(tk_root, config, _make_listener(), _make_obs(), config_path=tmp_path / "config.json", db_path=tmp_path / "markers.db")
     # Drive the event loop briefly so the window is fully rendered.
     tk_root.update()
 
@@ -112,7 +115,7 @@ def test_save_valid_writes_config_json(tk_root, tmp_path):
     listener = _make_listener()
     obs = _make_obs()
 
-    open_main_window(tk_root, config, listener, obs, config_path=config_path)
+    open_main_window(tk_root, config, listener, obs, config_path=config_path, db_path=tmp_path / "markers.db")
     tk_root.update()
 
     # Simulate setting a new hotkey by directly manipulating StringVars via
@@ -138,7 +141,7 @@ def test_save_valid_calls_update_hotkey(tk_root, tmp_path):
     listener = _make_listener()
     obs = _make_obs()
 
-    open_main_window(tk_root, config, listener, obs, config_path=tmp_path / "config.json")
+    open_main_window(tk_root, config, listener, obs, config_path=tmp_path / "config.json", db_path=tmp_path / "markers.db")
     tk_root.update()
 
     win = [w for w in tk_root.winfo_children() if isinstance(w, tk.Toplevel)][0]
@@ -156,7 +159,7 @@ def test_save_valid_calls_update_config_on_obs(tk_root, tmp_path):
     listener = _make_listener()
     obs = _make_obs()
 
-    open_main_window(tk_root, config, listener, obs, config_path=tmp_path / "config.json")
+    open_main_window(tk_root, config, listener, obs, config_path=tmp_path / "config.json", db_path=tmp_path / "markers.db")
     tk_root.update()
 
     win = [w for w in tk_root.winfo_children() if isinstance(w, tk.Toplevel)][0]
@@ -178,7 +181,7 @@ def test_save_invalid_hotkey_shows_error(tk_root, tmp_path):
     listener = _make_listener()
     obs = _make_obs()
 
-    open_main_window(tk_root, config, listener, obs, config_path=config_path)
+    open_main_window(tk_root, config, listener, obs, config_path=config_path, db_path=tmp_path / "markers.db")
     tk_root.update()
 
     win = [w for w in tk_root.winfo_children() if isinstance(w, tk.Toplevel)][0]
@@ -206,7 +209,7 @@ def test_save_invalid_port_shows_error(tk_root, tmp_path):
     listener = _make_listener()
     obs = _make_obs()
 
-    open_main_window(tk_root, config, listener, obs, config_path=config_path)
+    open_main_window(tk_root, config, listener, obs, config_path=config_path, db_path=tmp_path / "markers.db")
     tk_root.update()
 
     win = [w for w in tk_root.winfo_children() if isinstance(w, tk.Toplevel)][0]
@@ -230,7 +233,7 @@ def test_save_non_integer_port_shows_error(tk_root, tmp_path):
     listener = _make_listener()
     obs = _make_obs()
 
-    open_main_window(tk_root, config, listener, obs, config_path=config_path)
+    open_main_window(tk_root, config, listener, obs, config_path=config_path, db_path=tmp_path / "markers.db")
     tk_root.update()
 
     win = [w for w in tk_root.winfo_children() if isinstance(w, tk.Toplevel)][0]
@@ -255,12 +258,14 @@ def test_add_category_appends_to_json(tk_root, tmp_path):
     open_main_window(
         tk_root, _default_config(), _make_listener(), _make_obs(),
         categories_path=cats_path, config_path=tmp_path / "config.json",
+        db_path=tmp_path / "markers.db",
     )
     tk_root.update()
 
     win = [w for w in tk_root.winfo_children() if isinstance(w, tk.Toplevel)][0]
-    # The last Entry in the window is the category add entry (after hotkey, host, password).
-    entries = _find_widgets(win, tk.Entry)
+    # The last plain Entry (excluding Spinbox and Combobox) is the category add entry.
+    from tkinter import ttk
+    entries = [w for w in _find_widgets(win, tk.Entry) if not isinstance(w, (tk.Spinbox, ttk.Spinbox, ttk.Combobox))]
     cat_entry = entries[-1]
     cat_entry.delete(0, "end")
     cat_entry.insert(0, "gameplay")
@@ -279,11 +284,13 @@ def test_add_category_updates_listbox(tk_root, tmp_path):
     open_main_window(
         tk_root, _default_config(), _make_listener(), _make_obs(),
         categories_path=cats_path, config_path=tmp_path / "config.json",
+        db_path=tmp_path / "markers.db",
     )
     tk_root.update()
 
     win = [w for w in tk_root.winfo_children() if isinstance(w, tk.Toplevel)][0]
-    entries = _find_widgets(win, tk.Entry)
+    from tkinter import ttk
+    entries = [w for w in _find_widgets(win, tk.Entry) if not isinstance(w, (tk.Spinbox, ttk.Spinbox, ttk.Combobox))]
     cat_entry = entries[-1]
     cat_entry.delete(0, "end")
     cat_entry.insert(0, "tutorial")
@@ -306,11 +313,13 @@ def test_add_duplicate_category_is_ignored(tk_root, tmp_path):
     open_main_window(
         tk_root, _default_config(), _make_listener(), _make_obs(),
         categories_path=cats_path, config_path=tmp_path / "config.json",
+        db_path=tmp_path / "markers.db",
     )
     tk_root.update()
 
     win = [w for w in tk_root.winfo_children() if isinstance(w, tk.Toplevel)][0]
-    entries = _find_widgets(win, tk.Entry)
+    from tkinter import ttk
+    entries = [w for w in _find_widgets(win, tk.Entry) if not isinstance(w, (tk.Spinbox, ttk.Spinbox, ttk.Combobox))]
     cat_entry = entries[-1]
     cat_entry.delete(0, "end")
     cat_entry.insert(0, "gameplay")
@@ -328,11 +337,13 @@ def test_add_blank_category_is_ignored(tk_root, tmp_path):
     open_main_window(
         tk_root, _default_config(), _make_listener(), _make_obs(),
         categories_path=cats_path, config_path=tmp_path / "config.json",
+        db_path=tmp_path / "markers.db",
     )
     tk_root.update()
 
     win = [w for w in tk_root.winfo_children() if isinstance(w, tk.Toplevel)][0]
-    entries = _find_widgets(win, tk.Entry)
+    from tkinter import ttk
+    entries = [w for w in _find_widgets(win, tk.Entry) if not isinstance(w, (tk.Spinbox, ttk.Spinbox, ttk.Combobox))]
     cat_entry = entries[-1]
     cat_entry.delete(0, "end")
     cat_entry.insert(0, "   ")
@@ -392,3 +403,195 @@ def _set_spinbox_value(widget, value: str) -> None:
     spinboxes = _find_widgets(widget, ttk.Spinbox)
     spinboxes[0].delete(0, "end")
     spinboxes[0].insert(0, value)
+
+
+def _find_treeview(widget) -> "ttk.Treeview":
+    """Find the first ttk.Treeview under *widget*."""
+    from tkinter import ttk
+    results = _find_widgets(widget, ttk.Treeview)
+    assert results, "No Treeview found"
+    return results[0]
+
+
+def _find_comboboxes(widget) -> list:
+    """Find all ttk.Combobox widgets under *widget*."""
+    from tkinter import ttk
+    return _find_widgets(widget, ttk.Combobox)
+
+
+# ---------------------------------------------------------------------------
+# Markers tab — helpers
+# ---------------------------------------------------------------------------
+
+def _open_with_markers(tk_root, tmp_path, markers: list[dict]) -> tk.Toplevel:
+    """Open the main window with a temp DB pre-populated with *markers*."""
+    from checkpoint.main_window import open_main_window
+    from checkpoint.storage import append_marker
+
+    db_path = tmp_path / "markers.db"
+    for m in markers:
+        append_marker(
+            file_path=m["file_path"],
+            timestamp_ms=m["timestamp_ms"],
+            description=m["description"],
+            category=m["category"],
+            db_path=db_path,
+        )
+
+    open_main_window(
+        tk_root, _default_config(), _make_listener(), _make_obs(),
+        config_path=tmp_path / "config.json",
+        db_path=db_path,
+    )
+    tk_root.update()
+    return [w for w in tk_root.winfo_children() if isinstance(w, tk.Toplevel)][0]
+
+
+# ---------------------------------------------------------------------------
+# Markers tab — population on open
+# ---------------------------------------------------------------------------
+
+def test_markers_tab_populates_on_open(tk_root, tmp_path):
+    """Markers tab Treeview shows all DB rows on initial open."""
+    markers = [
+        {"file_path": r"C:\rec\video1.mkv", "timestamp_ms": 5000, "description": "First clip", "category": "gameplay"},
+        {"file_path": r"C:\rec\video1.mkv", "timestamp_ms": 10000, "description": "Second clip", "category": "bug"},
+        {"file_path": r"C:\rec\video2.mkv", "timestamp_ms": 2000, "description": "Third clip", "category": "gameplay"},
+    ]
+    win = _open_with_markers(tk_root, tmp_path, markers)
+    tree = _find_treeview(win)
+    assert len(tree.get_children()) == 3
+
+
+def test_markers_tab_empty_db_shows_no_rows(tk_root, tmp_path):
+    """Markers tab Treeview is empty when the DB has no markers."""
+    win = _open_with_markers(tk_root, tmp_path, [])
+    tree = _find_treeview(win)
+    assert len(tree.get_children()) == 0
+
+
+# ---------------------------------------------------------------------------
+# Markers tab — filter by recording
+# ---------------------------------------------------------------------------
+
+def test_markers_filter_by_recording(tk_root, tmp_path):
+    """Selecting a recording and clicking Refresh filters Treeview to that file."""
+    markers = [
+        {"file_path": r"C:\rec\video1.mkv", "timestamp_ms": 5000, "description": "Clip A", "category": "gameplay"},
+        {"file_path": r"C:\rec\video2.mkv", "timestamp_ms": 3000, "description": "Clip B", "category": "bug"},
+    ]
+    win = _open_with_markers(tk_root, tmp_path, markers)
+    tree = _find_treeview(win)
+
+    # Set Recording combobox to video1.mkv's full path.
+    combos = _find_comboboxes(win)
+    recording_combo = combos[0]
+    recording_combo.set(r"C:\rec\video1.mkv")
+
+    _click_button(win, "Refresh")
+    tk_root.update()
+
+    assert len(tree.get_children()) == 1
+    item = tree.get_children()[0]
+    assert tree.set(item, "description") == "Clip A"
+
+
+# ---------------------------------------------------------------------------
+# Markers tab — filter by category
+# ---------------------------------------------------------------------------
+
+def test_markers_filter_by_category(tk_root, tmp_path):
+    """Selecting a category and clicking Refresh filters Treeview to that category."""
+    markers = [
+        {"file_path": r"C:\rec\video1.mkv", "timestamp_ms": 5000, "description": "Clip A", "category": "gameplay"},
+        {"file_path": r"C:\rec\video1.mkv", "timestamp_ms": 8000, "description": "Clip B", "category": "bug"},
+    ]
+    win = _open_with_markers(tk_root, tmp_path, markers)
+    tree = _find_treeview(win)
+
+    combos = _find_comboboxes(win)
+    category_combo = combos[1]
+    category_combo.set("bug")
+
+    _click_button(win, "Refresh")
+    tk_root.update()
+
+    assert len(tree.get_children()) == 1
+    item = tree.get_children()[0]
+    assert tree.set(item, "description") == "Clip B"
+
+
+# ---------------------------------------------------------------------------
+# Markers tab — select all / unselect all
+# ---------------------------------------------------------------------------
+
+def test_markers_select_all(tk_root, tmp_path):
+    """'Select All' selects every visible row in the Treeview."""
+    markers = [
+        {"file_path": r"C:\rec\video1.mkv", "timestamp_ms": 1000, "description": "A", "category": "x"},
+        {"file_path": r"C:\rec\video1.mkv", "timestamp_ms": 2000, "description": "B", "category": "x"},
+        {"file_path": r"C:\rec\video1.mkv", "timestamp_ms": 3000, "description": "C", "category": "x"},
+    ]
+    win = _open_with_markers(tk_root, tmp_path, markers)
+    tree = _find_treeview(win)
+
+    _click_button(win, "Select All")
+    assert len(tree.selection()) == 3
+
+
+def test_markers_unselect_all(tk_root, tmp_path):
+    """'Unselect All' clears the selection."""
+    markers = [
+        {"file_path": r"C:\rec\video1.mkv", "timestamp_ms": 1000, "description": "A", "category": "x"},
+        {"file_path": r"C:\rec\video1.mkv", "timestamp_ms": 2000, "description": "B", "category": "x"},
+    ]
+    win = _open_with_markers(tk_root, tmp_path, markers)
+    tree = _find_treeview(win)
+
+    _click_button(win, "Select All")
+    assert len(tree.selection()) == 2
+
+    _click_button(win, "Unselect All")
+    assert len(tree.selection()) == 0
+
+
+# ---------------------------------------------------------------------------
+# Markers tab — export to CSV
+# ---------------------------------------------------------------------------
+
+def test_markers_export_csv_with_selection(tk_root, tmp_path):
+    """'Export to CSV' writes selected rows in the correct schema."""
+    markers = [
+        {"file_path": r"C:\rec\video1.mkv", "timestamp_ms": 5000, "description": "My clip", "category": "gameplay"},
+    ]
+    win = _open_with_markers(tk_root, tmp_path, markers)
+
+    _click_button(win, "Select All")
+
+    out_file = str(tmp_path / "export.csv")
+    with patch("tkinter.filedialog.asksaveasfilename", return_value=out_file):
+        _click_button(win, "Export to CSV")
+
+    assert (tmp_path / "export.csv").exists()
+    with open(out_file, newline="", encoding="utf-8") as fh:
+        reader = csv.DictReader(fh)
+        rows = list(reader)
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["file_path"] == r"C:\rec\video1.mkv"
+    assert row["timestamp_ms"] == "5000"
+    assert row["timestamp_hms"] == "00:00:05.000"
+    assert row["description"] == "My clip"
+    assert row["category"] == "gameplay"
+
+
+def test_markers_export_csv_empty_selection_shows_warning(tk_root, tmp_path):
+    """'Export to CSV' with no rows selected shows a warning and does not open file dialog."""
+    win = _open_with_markers(tk_root, tmp_path, [])
+
+    with patch("tkinter.messagebox.showwarning") as mock_warn, \
+         patch("tkinter.filedialog.asksaveasfilename") as mock_dialog:
+        _click_button(win, "Export to CSV")
+        mock_warn.assert_called_once()
+        mock_dialog.assert_not_called()

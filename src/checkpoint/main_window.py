@@ -1,11 +1,13 @@
 """Main application window with Settings and Markers tabs."""
+import csv
 import tkinter as tk
-from tkinter import messagebox, ttk
+from tkinter import filedialog, messagebox, ttk
 from pathlib import Path
 from typing import Any
 
 from checkpoint.categories import load_categories, save_categories
 from checkpoint.config import save_config
+from checkpoint.storage import list_categories, list_recordings, query_markers
 
 # Module-level reference to the single open window instance (None when closed).
 _window: tk.Toplevel | None = None
@@ -18,6 +20,7 @@ def open_main_window(
     obs_client: Any,
     categories_path: Path | None = None,
     config_path: Path | None = None,
+    db_path: Path | None = None,
 ) -> None:
     """Open the main Checkpoint window, or raise it if already open.
 
@@ -35,6 +38,8 @@ def open_main_window(
         Optional override for the categories.json path (used in tests).
     config_path:
         Optional override for the config.json path (used in tests).
+    db_path:
+        Optional override for the markers.db path (used in tests).
     """
     global _window
 
@@ -73,10 +78,10 @@ def open_main_window(
         config_path=config_path,
     )
 
-    # --- Markers tab (stub - implemented in task 4) ---
+    # --- Markers tab ---
     markers_frame = ttk.Frame(notebook)
     notebook.add(markers_frame, text="Markers")
-    ttk.Label(markers_frame, text="Markers tab - coming soon.").pack(padx=16, pady=16)
+    _build_markers_tab(markers_frame, db_path=db_path)
 
 
 def _build_settings_tab(
@@ -197,3 +202,127 @@ def _build_settings_tab(
         new_cat_var.set("")
 
     ttk.Button(add_frame, text="Add", command=_add_category).pack(side="left")
+
+
+def _build_markers_tab(
+    parent: ttk.Frame,
+    db_path: Path | None,
+) -> None:
+    """Populate the Markers tab with filter row, Treeview, and action buttons."""
+
+    # ------------------------------------------------------------------ #
+    # Filter row
+    # ------------------------------------------------------------------ #
+    filter_frame = ttk.Frame(parent)
+    filter_frame.pack(fill="x", padx=8, pady=8)
+
+    ttk.Label(filter_frame, text="Recording:").pack(side="left", padx=(0, 4))
+    recording_var = tk.StringVar(value="All")
+    recording_combo = ttk.Combobox(filter_frame, textvariable=recording_var, state="readonly", width=30)
+    recording_combo.pack(side="left", padx=(0, 8))
+
+    ttk.Label(filter_frame, text="Category:").pack(side="left", padx=(0, 4))
+    category_var = tk.StringVar(value="All")
+    category_combo = ttk.Combobox(filter_frame, textvariable=category_var, state="readonly", width=20)
+    category_combo.pack(side="left", padx=(0, 8))
+
+    # ------------------------------------------------------------------ #
+    # Treeview — file_path is a hidden column used for export
+    # ------------------------------------------------------------------ #
+    tree_frame = ttk.Frame(parent)
+    tree_frame.pack(fill="both", expand=True, padx=8, pady=(0, 4))
+
+    tree = ttk.Treeview(
+        tree_frame,
+        columns=("recording", "timestamp", "description", "category", "file_path", "timestamp_ms"),
+        displaycolumns=("recording", "timestamp", "description", "category"),
+        show="headings",
+        selectmode="extended",
+    )
+    tree.heading("recording", text="Recording")
+    tree.heading("timestamp", text="Timestamp")
+    tree.heading("description", text="Description")
+    tree.heading("category", text="Category")
+
+    scrollbar = ttk.Scrollbar(tree_frame, orient="vertical", command=tree.yview)
+    tree.configure(yscrollcommand=scrollbar.set)
+    tree.pack(side="left", fill="both", expand=True)
+    scrollbar.pack(side="right", fill="y")
+
+    # ------------------------------------------------------------------ #
+    # Button row
+    # ------------------------------------------------------------------ #
+    btn_frame = ttk.Frame(parent)
+    btn_frame.pack(fill="x", padx=8, pady=(0, 8))
+
+    def _refresh() -> None:
+        """Reload dropdowns and repopulate the Treeview from the DB."""
+        # Rebuild recording dropdown.
+        recordings = list_recordings(db_path=db_path)
+        recording_combo["values"] = ["All"] + recordings
+
+        # Rebuild category dropdown.
+        categories = list_categories(db_path=db_path)
+        category_combo["values"] = ["All"] + categories
+
+        # Determine filter values.
+        rec_filter = recording_var.get()
+        file_path_filter: str | None = None if rec_filter == "All" else rec_filter
+
+        cat_filter = category_var.get()
+        category_filter: str | None = None if cat_filter == "All" else cat_filter
+
+        # Repopulate Treeview.
+        tree.delete(*tree.get_children())
+        for row in query_markers(file_path=file_path_filter, category=category_filter, db_path=db_path):
+            basename = Path(row["file_path"]).name
+            tree.insert(
+                "",
+                "end",
+                values=(
+                    basename,
+                    row["timestamp_hms"],
+                    row["description"],
+                    row["category"],
+                    row["file_path"],
+                    row["timestamp_ms"],
+                ),
+            )
+
+    ttk.Button(filter_frame, text="Refresh", command=_refresh).pack(side="left")
+
+    def _select_all() -> None:
+        tree.selection_set(tree.get_children())
+
+    def _unselect_all() -> None:
+        tree.selection_set([])
+
+    def _export_csv() -> None:
+        selected = tree.selection()
+        if not selected:
+            messagebox.showwarning("No selection", "Select at least one row before exporting.")
+            return
+
+        out_path = filedialog.asksaveasfilename(
+            defaultextension=".csv",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+            title="Export markers to CSV",
+        )
+        if not out_path:
+            return
+
+        with open(out_path, "w", newline="", encoding="utf-8") as fh:
+            writer = csv.writer(fh)
+            writer.writerow(["file_path", "timestamp_ms", "timestamp_hms", "description", "category"])
+            for item_id in selected:
+                vals = tree.item(item_id, "values")
+                # values order: recording(basename), timestamp_hms, description, category, file_path, timestamp_ms
+                _recording, timestamp_hms, description, category, file_path, timestamp_ms = vals
+                writer.writerow([file_path, timestamp_ms, timestamp_hms, description, category])
+
+    ttk.Button(btn_frame, text="Select All", command=_select_all).pack(side="left", padx=(0, 4))
+    ttk.Button(btn_frame, text="Unselect All", command=_unselect_all).pack(side="left", padx=(0, 4))
+    ttk.Button(btn_frame, text="Export to CSV", command=_export_csv).pack(side="left")
+
+    # Populate on open.
+    _refresh()
