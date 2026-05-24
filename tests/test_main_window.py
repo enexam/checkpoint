@@ -665,3 +665,46 @@ def test_markers_export_csv_empty_selection_shows_warning(tk_root, tmp_path):
         _click_button(win, "Export to CSV")
         mock_warn.assert_called_once()
         mock_dialog.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Markers tab - set category
+# ---------------------------------------------------------------------------
+
+def test_set_category_button_updates_db(tk_root, tmp_path):
+    """'Set for Selection' updates the category of selected markers in the DB."""
+    from checkpoint.storage import query_markers
+
+    markers = [
+        {"file_path": r"C:\rec\v.mkv", "timestamp_ms": 1000, "description": "A", "category": "old"},
+        {"file_path": r"C:\rec\v.mkv", "timestamp_ms": 2000, "description": "B", "category": "old"},
+    ]
+    db_path = tmp_path / "markers.db"
+    win = _open_with_markers(tk_root, tmp_path, markers)
+    tree = _find_treeview(win)
+
+    # Select only the first row.
+    first_item = tree.get_children()[0]
+    tree.selection_set([first_item])
+
+    # Set the category combobox to "newcat".
+    combos = _find_comboboxes(win)
+    set_cat_combo = combos[2]
+    set_cat_combo.set("newcat")
+
+    _click_button(win, "Set for Selection")
+    tk_root.update()
+
+    rows = query_markers(db_path=db_path)
+    cats = {r["description"]: r["category"] for r in rows}
+    assert cats["A"] == "newcat"
+    assert cats["B"] == "old"
+
+
+def test_set_category_no_selection_shows_warning(tk_root, tmp_path):
+    """'Set for Selection' with nothing selected shows a warning."""
+    win = _open_with_markers(tk_root, tmp_path, [])
+
+    with patch("tkinter.messagebox.showwarning") as mock_warn:
+        _click_button(win, "Set for Selection")
+        mock_warn.assert_called_once()

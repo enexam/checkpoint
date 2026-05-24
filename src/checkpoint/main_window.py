@@ -7,7 +7,7 @@ from typing import Any, Callable
 
 from checkpoint.categories import load_categories, save_categories
 from checkpoint.config import save_config
-from checkpoint.storage import list_categories, list_recordings, query_markers
+from checkpoint.storage import list_categories, list_recordings, query_markers, update_markers_category
 
 # Module-level reference to the single open window instance (None when closed).
 _window: tk.Toplevel | None = None
@@ -249,7 +249,7 @@ def _build_markers_tab(
 
     tree = ttk.Treeview(
         tree_frame,
-        columns=("recording", "timestamp", "description", "category", "file_path", "timestamp_ms"),
+        columns=("recording", "timestamp", "description", "category", "file_path", "timestamp_ms", "id"),
         displaycolumns=("recording", "timestamp", "description", "category"),
         show="headings",
         selectmode="extended",
@@ -265,10 +265,15 @@ def _build_markers_tab(
     scrollbar.pack(side="right", fill="y")
 
     # ------------------------------------------------------------------ #
-    # Button row
+    # Button rows
     # ------------------------------------------------------------------ #
     btn_frame = ttk.Frame(parent)
-    btn_frame.pack(fill="x", padx=8, pady=(0, 8))
+    btn_frame.pack(fill="x", padx=8, pady=(0, 2))
+
+    set_cat_frame = ttk.Frame(parent)
+    set_cat_frame.pack(fill="x", padx=8, pady=(0, 8))
+
+    set_cat_var = tk.StringVar()
 
     def _refresh() -> None:
         """Reload dropdowns and repopulate the Treeview from the DB."""
@@ -287,6 +292,9 @@ def _build_markers_tab(
         cat_filter = category_var.get()
         category_filter: str | None = None if cat_filter == "All" else cat_filter
 
+        # Rebuild set-category combobox values.
+        set_cat_combo["values"] = categories
+
         # Repopulate Treeview.
         tree.delete(*tree.get_children())
         for row in query_markers(file_path=file_path_filter, category=category_filter, db_path=db_path):
@@ -301,6 +309,7 @@ def _build_markers_tab(
                     row["category"],
                     row["file_path"],
                     row["timestamp_ms"],
+                    row["id"],
                 ),
             )
 
@@ -334,13 +343,33 @@ def _build_markers_tab(
             writer.writerow(["file_path", "timestamp_ms", "timestamp_hms", "description", "category"])
             for item_id in selected:
                 vals = tree.item(item_id, "values")
-                # values order: recording(basename), timestamp_hms, description, category, file_path, timestamp_ms
-                _recording, timestamp_hms, description, category, file_path, timestamp_ms = vals
+                # values order: recording(basename), timestamp_hms, description, category, file_path, timestamp_ms, id
+                _recording, timestamp_hms, description, category, file_path, timestamp_ms, _id = vals
                 writer.writerow([file_path, timestamp_ms, timestamp_hms, description, category])
 
     ttk.Button(btn_frame, text="Select All", command=_select_all).pack(side="left", padx=(0, 4))
     ttk.Button(btn_frame, text="Unselect All", command=_unselect_all).pack(side="left", padx=(0, 4))
     ttk.Button(btn_frame, text="Export to CSV", command=_export_csv).pack(side="left")
+
+    # Set category row
+    set_cat_combo = ttk.Combobox(set_cat_frame, textvariable=set_cat_var, state="normal", width=18)
+
+    def _set_category() -> None:
+        selected = tree.selection()
+        if not selected:
+            messagebox.showwarning("No selection", "Select at least one row before setting a category.")
+            return
+        cat = set_cat_var.get().strip()
+        if not cat:
+            messagebox.showwarning("No category", "Enter or select a category first.")
+            return
+        ids = [int(tree.item(item_id, "values")[6]) for item_id in selected]
+        update_markers_category(ids, cat, db_path=db_path)
+        _refresh()
+
+    ttk.Label(set_cat_frame, text="Set category:").pack(side="left", padx=(0, 4))
+    set_cat_combo.pack(side="left", padx=(0, 4))
+    ttk.Button(set_cat_frame, text="Set for Selection", command=_set_category).pack(side="left")
 
     # Register for new-marker notifications and populate on open.
     global _refresh_fn

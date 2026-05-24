@@ -196,3 +196,34 @@ def test_list_categories_empty(tmp_path):
     db = tmp_path / "markers.db"
     init_db(db)
     assert list_categories(db_path=db) == []
+
+
+# ---------------------------------------------------------------------------
+# update_markers_category
+# ---------------------------------------------------------------------------
+
+def test_update_markers_category(tmp_path):
+    """update_markers_category changes the category for specified IDs only."""
+    from checkpoint.storage import update_markers_category
+    db = tmp_path / "markers.db"
+    append_marker("C:/rec.mkv", 0, "first", "old", db_path=db)
+    append_marker("C:/rec.mkv", 1000, "second", "old", db_path=db)
+    rows = query_markers(db_path=db)
+    id1 = rows[0]["id"]
+
+    update_markers_category([id1], "new_cat", db_path=db)
+
+    updated = query_markers(db_path=db)
+    by_id = {r["id"]: r for r in updated}
+    assert by_id[id1]["category"] == "new_cat"
+    assert by_id[rows[1]["id"]]["category"] == "old"
+
+
+def test_update_markers_category_noop_on_empty(tmp_path):
+    """update_markers_category with empty list does nothing."""
+    from checkpoint.storage import update_markers_category
+    db = tmp_path / "markers.db"
+    append_marker("C:/rec.mkv", 0, "desc", "original", db_path=db)
+    update_markers_category([], "new_cat", db_path=db)
+    rows = query_markers(db_path=db)
+    assert rows[0]["category"] == "original"

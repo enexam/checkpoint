@@ -124,3 +124,24 @@ def list_categories(db_path: str | Path | None = None) -> list[str]:
         return [row[0] for row in rows]
     finally:
         con.close()
+
+
+def update_markers_category(
+    marker_ids: list[int],
+    category: str,
+    db_path: str | Path | None = None,
+) -> None:
+    """Set the category column for the given marker IDs. No-op if marker_ids is empty."""
+    if not marker_ids:
+        return
+    path = _resolve_db_path(db_path)
+    con = sqlite3.connect(path)
+    try:
+        placeholders = ",".join("?" * len(marker_ids))
+        con.execute(
+            f"UPDATE markers SET category = ? WHERE id IN ({placeholders})",
+            [category, *marker_ids],
+        )
+        con.commit()
+    finally:
+        con.close()
