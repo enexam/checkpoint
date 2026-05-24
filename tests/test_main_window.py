@@ -708,3 +708,24 @@ def test_set_category_no_selection_shows_warning(tk_root, tmp_path):
     with patch("tkinter.messagebox.showwarning") as mock_warn:
         _click_button(win, "Set for Selection")
         mock_warn.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Quit button
+# ---------------------------------------------------------------------------
+
+def test_quit_button_calls_root_quit(tk_root, tmp_path):
+    """The Quit button in the main window calls root.quit()."""
+    from checkpoint.main_window import open_main_window
+
+    open_main_window(
+        tk_root, _default_config(), _make_listener(), _make_obs(),
+        config_path=tmp_path / "config.json",
+        db_path=tmp_path / "markers.db",
+    )
+    tk_root.update()
+
+    win = [w for w in tk_root.winfo_children() if isinstance(w, tk.Toplevel)][0]
+    with patch.object(tk_root, "quit") as mock_quit:
+        _click_button(win, "Quit")
+        mock_quit.assert_called_once()

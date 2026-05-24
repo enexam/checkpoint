@@ -95,6 +95,16 @@ def open_main_window(
     notebook.add(markers_frame, text="Markers")
     _build_markers_tab(markers_frame, db_path=db_path)
 
+    # --- Bottom bar ---
+    bottom_frame = ttk.Frame(win)
+    bottom_frame.pack(fill="x", padx=8, pady=(0, 8))
+
+    def _quit() -> None:
+        _on_close()
+        root.quit()
+
+    ttk.Button(bottom_frame, text="Quit", command=_quit).pack(side="right")
+
 
 def _build_settings_tab(
     parent: ttk.Frame,
