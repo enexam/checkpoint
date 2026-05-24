@@ -8,18 +8,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 
-@pytest.fixture(scope="session")
-def _tk_session_root():
-    """One hidden tk.Tk root for the entire test session."""
-    root = tk.Tk()
-    root.withdraw()
-    yield root
-    try:
-        root.destroy()
-    except tk.TclError:
-        pass
-
-
 @pytest.fixture()
 def tk_root(_tk_session_root):
     """Per-test fixture: yields the session root, then destroys any Toplevel children and resets _window."""
