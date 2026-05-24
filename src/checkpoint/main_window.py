@@ -227,7 +227,7 @@ def _build_markers_tab(
     category_combo.pack(side="left", padx=(0, 8))
 
     # ------------------------------------------------------------------ #
-    # Treeview — file_path is a hidden column used for export
+    # Treeview - file_path is a hidden column used for export
     # ------------------------------------------------------------------ #
     tree_frame = ttk.Frame(parent)
     tree_frame.pack(fill="both", expand=True, padx=8, pady=(0, 4))

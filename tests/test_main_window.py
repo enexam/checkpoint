@@ -8,20 +8,30 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 
-@pytest.fixture()
-def tk_root():
-    """Provide a hidden tk.Tk root; destroy after the test."""
+@pytest.fixture(scope="session")
+def _tk_session_root():
+    """One hidden tk.Tk root for the entire test session."""
     root = tk.Tk()
     root.withdraw()
     yield root
-    # Reset the module-level _window reference before destroying root so that
-    # any Toplevel created during the test is cleaned up properly.
-    import checkpoint.main_window as mw
-    mw._window = None
     try:
         root.destroy()
     except tk.TclError:
         pass
+
+
+@pytest.fixture()
+def tk_root(_tk_session_root):
+    """Per-test fixture: yields the session root, then destroys any Toplevel children and resets _window."""
+    yield _tk_session_root
+    import checkpoint.main_window as mw
+    mw._window = None
+    for child in list(_tk_session_root.winfo_children()):
+        if isinstance(child, tk.Toplevel):
+            try:
+                child.destroy()
+            except tk.TclError:
+                pass
 
 
 def _make_listener(hotkey_str: str = "ctrl+f9") -> MagicMock:
@@ -420,7 +430,7 @@ def _find_comboboxes(widget) -> list:
 
 
 # ---------------------------------------------------------------------------
-# Markers tab — helpers
+# Markers tab - helpers
 # ---------------------------------------------------------------------------
 
 def _open_with_markers(tk_root, tmp_path, markers: list[dict]) -> tk.Toplevel:
@@ -448,7 +458,7 @@ def _open_with_markers(tk_root, tmp_path, markers: list[dict]) -> tk.Toplevel:
 
 
 # ---------------------------------------------------------------------------
-# Markers tab — population on open
+# Markers tab - population on open
 # ---------------------------------------------------------------------------
 
 def test_markers_tab_populates_on_open(tk_root, tmp_path):
@@ -471,7 +481,7 @@ def test_markers_tab_empty_db_shows_no_rows(tk_root, tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Markers tab — filter by recording
+# Markers tab - filter by recording
 # ---------------------------------------------------------------------------
 
 def test_markers_filter_by_recording(tk_root, tmp_path):
@@ -497,7 +507,7 @@ def test_markers_filter_by_recording(tk_root, tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Markers tab — filter by category
+# Markers tab - filter by category
 # ---------------------------------------------------------------------------
 
 def test_markers_filter_by_category(tk_root, tmp_path):
@@ -522,7 +532,7 @@ def test_markers_filter_by_category(tk_root, tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Markers tab — select all / unselect all
+# Markers tab - select all / unselect all
 # ---------------------------------------------------------------------------
 
 def test_markers_select_all(tk_root, tmp_path):
@@ -556,7 +566,7 @@ def test_markers_unselect_all(tk_root, tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Markers tab — export to CSV
+# Markers tab - export to CSV
 # ---------------------------------------------------------------------------
 
 def test_markers_export_csv_with_selection(tk_root, tmp_path):
