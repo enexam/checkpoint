@@ -14,21 +14,16 @@ import tkinter.ttk as ttk
 import pytest
 
 
-# Session fixture: one Tk root for all popup tests
-
-@pytest.fixture(scope="session")
-def tk_root():
-    """Create a single withdrawn Tk root reused across all popup tests."""
-    try:
-        root = tk.Tk()
-        root.withdraw()
-    except Exception:
-        pytest.skip("No display available for Tk tests")
-    yield root
-    try:
-        root.destroy()
-    except Exception:
-        pass
+@pytest.fixture()
+def tk_root(_tk_session_root):
+    """Per-test fixture: yields the shared session root, then destroys any Toplevel children."""
+    yield _tk_session_root
+    for child in list(_tk_session_root.winfo_children()):
+        if isinstance(child, tk.Toplevel):
+            try:
+                child.destroy()
+            except tk.TclError:
+                pass
 
 
 # Helpers

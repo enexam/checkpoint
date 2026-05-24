@@ -1,109 +1,229 @@
-"""Tests for storage.py (task 3: CSV storage)."""
-import csv
-
+"""Tests for storage.py (SQLite backend)."""
 import pytest
 
-from checkpoint.storage import append_marker
+from checkpoint.storage import (
+    append_marker,
+    init_db,
+    list_categories,
+    list_recordings,
+    query_markers,
+)
 
 
-# CSV path derivation
+# ---------------------------------------------------------------------------
+# init_db
+# ---------------------------------------------------------------------------
 
-def test_csv_path_derived_from_mkv(tmp_path):
-    """CSV path uses same stem + _markers.csv for .mkv input."""
-    video = tmp_path / "obs_2024.mkv"
-    append_marker(str(video), 0, "test", "")
-    expected = tmp_path / "obs_2024_markers.csv"
-    assert expected.exists()
-
-
-def test_csv_path_derived_from_mp4(tmp_path):
-    """CSV path uses same stem + _markers.csv for .mp4 input."""
-    video = tmp_path / "recording.mp4"
-    append_marker(str(video), 0, "test", "")
-    expected = tmp_path / "recording_markers.csv"
-    assert expected.exists()
+def test_init_db_creates_table(tmp_path):
+    """init_db creates the markers table; calling it twice is idempotent."""
+    db = tmp_path / "markers.db"
+    init_db(db)
+    assert db.exists()
+    # Second call must not raise
+    init_db(db)
 
 
-# Header row creation
-
-def test_creates_header_when_csv_does_not_exist(tmp_path):
-    """Creates CSV with correct UTF-8 header row when file does not exist."""
-    video = tmp_path / "obs_2024.mkv"
-    append_marker(str(video), 0, "desc", "cat")
-
-    csv_path = tmp_path / "obs_2024_markers.csv"
-    rows = list(csv.reader(csv_path.open(encoding="utf-8")))
-    assert rows[0] == ["file_path", "timestamp_ms", "timestamp_hms", "description", "category"]
-
-
-def test_no_duplicate_header_when_csv_exists(tmp_path):
-    """Does not write header row when CSV already exists."""
-    video = tmp_path / "obs_2024.mkv"
-    append_marker(str(video), 0, "first", "a")
-    append_marker(str(video), 1000, "second", "b")
-
-    csv_path = tmp_path / "obs_2024_markers.csv"
-    rows = list(csv.reader(csv_path.open(encoding="utf-8")))
-    # header + 2 data rows, no duplicate header
-    assert len(rows) == 3
-    assert rows[0] == ["file_path", "timestamp_ms", "timestamp_hms", "description", "category"]
+def test_init_db_creates_indexes(tmp_path):
+    """init_db creates indexes on file_path and category."""
+    import sqlite3
+    db = tmp_path / "markers.db"
+    init_db(db)
+    con = sqlite3.connect(db)
+    names = {row[1] for row in con.execute("PRAGMA index_list('markers')").fetchall()}
+    con.close()
+    assert "idx_markers_file_path" in names
+    assert "idx_markers_category" in names
 
 
-# Data row content
+# ---------------------------------------------------------------------------
+# append_marker
+# ---------------------------------------------------------------------------
 
-def test_data_row_values(tmp_path):
-    """Data row contains correct file_path, timestamp_ms, timestamp_hms, description, category."""
-    video = tmp_path / "obs_2024.mkv"
-    append_marker(str(video), 90500, "highlight", "gameplay")
-
-    csv_path = tmp_path / "obs_2024_markers.csv"
-    rows = list(csv.reader(csv_path.open(encoding="utf-8")))
-    data = rows[1]
-    assert data[0] == str(video)
-    assert data[1] == "90500"
-    assert data[2] == "00:01:30.500"
-    assert data[3] == "highlight"
-    assert data[4] == "gameplay"
+def test_append_marker_inserts_row(tmp_path):
+    """append_marker inserts a row retrievable via query_markers."""
+    db = tmp_path / "markers.db"
+    append_marker("C:/rec.mkv", 5000, "great moment", "gameplay", db_path=db)
+    rows = query_markers(db_path=db)
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["file_path"] == "C:/rec.mkv"
+    assert row["timestamp_ms"] == 5000
+    assert row["description"] == "great moment"
+    assert row["category"] == "gameplay"
 
 
-def test_timestamp_hms_large_hours(tmp_path):
+def test_append_marker_derives_timestamp_hms(tmp_path):
+    """append_marker stores correct timestamp_hms for 90500 ms."""
+    db = tmp_path / "markers.db"
+    append_marker("C:/rec.mkv", 90500, "highlight", "gameplay", db_path=db)
+    rows = query_markers(db_path=db)
+    assert rows[0]["timestamp_hms"] == "00:01:30.500"
+
+
+def test_append_marker_hms_large_hours(tmp_path):
     """timestamp_hms correctly formats 90061000 ms as 25:01:01.000."""
-    video = tmp_path / "rec.mkv"
-    append_marker(str(video), 90061000, "desc", "cat")
-
-    csv_path = tmp_path / "rec_markers.csv"
-    rows = list(csv.reader(csv_path.open(encoding="utf-8")))
-    assert rows[1][2] == "25:01:01.000"
+    db = tmp_path / "markers.db"
+    append_marker("C:/rec.mkv", 90061000, "desc", "cat", db_path=db)
+    rows = query_markers(db_path=db)
+    assert rows[0]["timestamp_hms"] == "25:01:01.000"
 
 
-def test_timestamp_hms_zero(tmp_path):
+def test_append_marker_hms_zero(tmp_path):
     """timestamp_hms correctly formats 0 ms as 00:00:00.000."""
-    video = tmp_path / "rec.mkv"
-    append_marker(str(video), 0, "desc", "cat")
-
-    csv_path = tmp_path / "rec_markers.csv"
-    rows = list(csv.reader(csv_path.open(encoding="utf-8")))
-    assert rows[1][2] == "00:00:00.000"
+    db = tmp_path / "markers.db"
+    append_marker("C:/rec.mkv", 0, "desc", "cat", db_path=db)
+    rows = query_markers(db_path=db)
+    assert rows[0]["timestamp_hms"] == "00:00:00.000"
 
 
-# UTF-8 and quoting
-
-def test_utf8_encoding(tmp_path):
-    """CSV is written with UTF-8 encoding (survives non-ASCII characters)."""
-    video = tmp_path / "rec.mkv"
-    append_marker(str(video), 0, "déjà vu", "catégorie")
-
-    csv_path = tmp_path / "rec_markers.csv"
-    content = csv_path.read_text(encoding="utf-8")
-    assert "déjà vu" in content
-    assert "catégorie" in content
+def test_append_marker_multiple_rows(tmp_path):
+    """Multiple append_marker calls accumulate rows."""
+    db = tmp_path / "markers.db"
+    append_marker("C:/rec.mkv", 0, "first", "a", db_path=db)
+    append_marker("C:/rec.mkv", 1000, "second", "b", db_path=db)
+    rows = query_markers(db_path=db)
+    assert len(rows) == 2
 
 
-def test_values_with_commas_are_quoted(tmp_path):
-    """Values containing commas are properly quoted by the csv module."""
-    video = tmp_path / "rec.mkv"
-    append_marker(str(video), 0, "a, b, c", "cat")
+def test_append_marker_utf8(tmp_path):
+    """append_marker survives non-ASCII characters in description and category."""
+    db = tmp_path / "markers.db"
+    append_marker("C:/rec.mkv", 0, "déjà vu", "catégorie", db_path=db)
+    rows = query_markers(db_path=db)
+    assert rows[0]["description"] == "déjà vu"
+    assert rows[0]["category"] == "catégorie"
 
-    csv_path = tmp_path / "rec_markers.csv"
-    rows = list(csv.reader(csv_path.open(encoding="utf-8")))
-    assert rows[1][3] == "a, b, c"
+
+def test_append_marker_row_has_id_and_created_at(tmp_path):
+    """Inserted row has auto-generated id and created_at columns."""
+    db = tmp_path / "markers.db"
+    append_marker("C:/rec.mkv", 0, "desc", "cat", db_path=db)
+    rows = query_markers(db_path=db)
+    assert "id" in rows[0]
+    assert "created_at" in rows[0]
+    assert rows[0]["id"] == 1
+
+
+# ---------------------------------------------------------------------------
+# query_markers
+# ---------------------------------------------------------------------------
+
+def test_query_markers_no_filter_returns_all(tmp_path):
+    """query_markers with no filter returns all rows."""
+    db = tmp_path / "markers.db"
+    append_marker("C:/a.mkv", 0, "desc1", "catA", db_path=db)
+    append_marker("C:/b.mkv", 1000, "desc2", "catB", db_path=db)
+    rows = query_markers(db_path=db)
+    assert len(rows) == 2
+
+
+def test_query_markers_filter_by_file_path(tmp_path):
+    """query_markers filters correctly when file_path is set."""
+    db = tmp_path / "markers.db"
+    append_marker("C:/a.mkv", 0, "desc1", "catA", db_path=db)
+    append_marker("C:/b.mkv", 1000, "desc2", "catB", db_path=db)
+    rows = query_markers(file_path="C:/a.mkv", db_path=db)
+    assert len(rows) == 1
+    assert rows[0]["file_path"] == "C:/a.mkv"
+
+
+def test_query_markers_filter_by_category(tmp_path):
+    """query_markers filters correctly when category is set."""
+    db = tmp_path / "markers.db"
+    append_marker("C:/a.mkv", 0, "desc1", "catA", db_path=db)
+    append_marker("C:/b.mkv", 1000, "desc2", "catB", db_path=db)
+    rows = query_markers(category="catB", db_path=db)
+    assert len(rows) == 1
+    assert rows[0]["category"] == "catB"
+
+
+def test_query_markers_filter_by_both(tmp_path):
+    """query_markers filters correctly when both file_path and category are set."""
+    db = tmp_path / "markers.db"
+    append_marker("C:/a.mkv", 0, "desc1", "catA", db_path=db)
+    append_marker("C:/a.mkv", 1000, "desc2", "catB", db_path=db)
+    append_marker("C:/b.mkv", 2000, "desc3", "catA", db_path=db)
+    rows = query_markers(file_path="C:/a.mkv", category="catA", db_path=db)
+    assert len(rows) == 1
+    assert rows[0]["description"] == "desc1"
+
+
+def test_query_markers_returns_list_of_dicts(tmp_path):
+    """query_markers return type is list[dict]."""
+    db = tmp_path / "markers.db"
+    init_db(db)
+    rows = query_markers(db_path=db)
+    assert isinstance(rows, list)
+
+
+# ---------------------------------------------------------------------------
+# list_recordings
+# ---------------------------------------------------------------------------
+
+def test_list_recordings_distinct_sorted(tmp_path):
+    """list_recordings returns distinct file_path values, sorted."""
+    db = tmp_path / "markers.db"
+    append_marker("C:/b.mkv", 0, "d", "c", db_path=db)
+    append_marker("C:/a.mkv", 0, "d", "c", db_path=db)
+    append_marker("C:/b.mkv", 1000, "d2", "c", db_path=db)
+    result = list_recordings(db_path=db)
+    assert result == ["C:/a.mkv", "C:/b.mkv"]
+
+
+def test_list_recordings_empty(tmp_path):
+    """list_recordings returns empty list when no markers exist."""
+    db = tmp_path / "markers.db"
+    init_db(db)
+    assert list_recordings(db_path=db) == []
+
+
+# ---------------------------------------------------------------------------
+# list_categories
+# ---------------------------------------------------------------------------
+
+def test_list_categories_distinct_sorted(tmp_path):
+    """list_categories returns distinct category values, sorted."""
+    db = tmp_path / "markers.db"
+    append_marker("C:/rec.mkv", 0, "d", "beta", db_path=db)
+    append_marker("C:/rec.mkv", 1000, "d", "alpha", db_path=db)
+    append_marker("C:/rec.mkv", 2000, "d", "beta", db_path=db)
+    result = list_categories(db_path=db)
+    assert result == ["alpha", "beta"]
+
+
+def test_list_categories_empty(tmp_path):
+    """list_categories returns empty list when no markers exist."""
+    db = tmp_path / "markers.db"
+    init_db(db)
+    assert list_categories(db_path=db) == []
+
+
+# ---------------------------------------------------------------------------
+# update_markers_category
+# ---------------------------------------------------------------------------
+
+def test_update_markers_category(tmp_path):
+    """update_markers_category changes the category for specified IDs only."""
+    from checkpoint.storage import update_markers_category
+    db = tmp_path / "markers.db"
+    append_marker("C:/rec.mkv", 0, "first", "old", db_path=db)
+    append_marker("C:/rec.mkv", 1000, "second", "old", db_path=db)
+    rows = query_markers(db_path=db)
+    id1 = rows[0]["id"]
+
+    update_markers_category([id1], "new_cat", db_path=db)
+
+    updated = query_markers(db_path=db)
+    by_id = {r["id"]: r for r in updated}
+    assert by_id[id1]["category"] == "new_cat"
+    assert by_id[rows[1]["id"]]["category"] == "old"
+
+
+def test_update_markers_category_noop_on_empty(tmp_path):
+    """update_markers_category with empty list does nothing."""
+    from checkpoint.storage import update_markers_category
+    db = tmp_path / "markers.db"
+    append_marker("C:/rec.mkv", 0, "desc", "original", db_path=db)
+    update_markers_category([], "new_cat", db_path=db)
+    rows = query_markers(db_path=db)
+    assert rows[0]["category"] == "original"
