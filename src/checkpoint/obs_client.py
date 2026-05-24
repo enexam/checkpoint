@@ -58,6 +58,16 @@ class ObsClient:
             self._thread.join(timeout=10)
             self._thread = None
 
+    def update_config(self, config: dict) -> None:
+        """Stop, apply new connection parameters from *config*, and restart."""
+        self.stop()
+        self._host = config.get("obs_host", "localhost")
+        self._port = config.get("obs_port", 4455)
+        self._password = config.get("obs_password", "")
+        self._is_recording = False
+        self._recording_file = None
+        self.start()
+
     def get_snapshot(self) -> dict | None:
         """Return current recording snapshot or None.
 

@@ -33,3 +33,10 @@ def load_config(*, config_path: Path | None = None) -> dict:
         return dict(_DEFAULTS)
 
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def save_config(config: dict, *, config_path: Path | None = None) -> None:
+    """Write *config* to the configuration file, creating parent directories as needed."""
+    path = Path(config_path) if config_path is not None else _default_config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(config, indent=2), encoding="utf-8")

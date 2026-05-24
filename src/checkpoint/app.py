@@ -16,6 +16,7 @@ from checkpoint.categories import load_categories, save_categories
 from checkpoint.config import load_config
 from checkpoint.obs_client import ObsClient
 from checkpoint.popup import show_popup
+from checkpoint.main_window import open_main_window
 from checkpoint.storage import append_marker, init_db
 
 _WM_HOTKEY = 0x0312
@@ -65,6 +66,16 @@ class _HotkeyListener:
             ctypes.windll.user32.PostThreadMessageW(
                 self._thread_id, _WM_QUIT, 0, 0
             )
+
+    def update_hotkey(self, hotkey_str: str) -> None:
+        """Stop the current hotkey thread, parse the new hotkey, and start a fresh thread."""
+        self.stop()
+        if self._thread is not None:
+            self._thread.join(timeout=2)
+        self._mods, self._vk = _parse_hotkey(hotkey_str)
+        self._thread_id = None
+        self._thread = threading.Thread(target=self._run, daemon=True, name="hotkey")
+        self._thread.start()
 
     def _run(self) -> None:
         self._thread_id = ctypes.windll.kernel32.GetCurrentThreadId()
@@ -139,10 +150,6 @@ def _setup_logging() -> None:
     logging.info("Checkpoint starting")
 
 
-def open_main_window(*args, **kwargs) -> None:
-    """Placeholder — implemented in task 3."""
-
-
 def main() -> None:
     _setup_logging()
     ctypes.windll.kernel32.SetConsoleTitleW("Checkpoint")
@@ -169,7 +176,7 @@ def main() -> None:
     listener.start()
 
     def _open(icon: pystray.Icon, _item: object) -> None:
-        root.after(0, open_main_window)
+        root.after(0, lambda: open_main_window(root, config, listener, obs))
 
     def _quit(icon: pystray.Icon, _item: object) -> None:
         icon.stop()
