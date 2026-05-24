@@ -494,6 +494,53 @@ def test_markers_tab_empty_db_shows_no_rows(tk_root, tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# Markers tab - auto-refresh and notification
+# ---------------------------------------------------------------------------
+
+def test_recording_combo_triggers_refresh(tk_root, tmp_path):
+    """Selecting a recording in the combobox refreshes the treeview automatically."""
+    markers = [
+        {"file_path": r"C:\rec\a.mkv", "timestamp_ms": 1000, "description": "A", "category": "x"},
+        {"file_path": r"C:\rec\b.mkv", "timestamp_ms": 2000, "description": "B", "category": "x"},
+    ]
+    win = _open_with_markers(tk_root, tmp_path, markers)
+    tree = _find_treeview(win)
+
+    combos = _find_comboboxes(win)
+    recording_combo = combos[0]
+    recording_combo.set(r"C:\rec\a.mkv")
+    recording_combo.event_generate("<<ComboboxSelected>>")
+    tk_root.update()
+
+    assert len(tree.get_children()) == 1
+    assert tree.set(tree.get_children()[0], "description") == "A"
+
+
+def test_notify_new_marker_refreshes_treeview(tk_root, tmp_path):
+    """notify_new_marker() repopulates the Markers treeview while the window is open."""
+    from checkpoint.main_window import open_main_window, notify_new_marker
+    from checkpoint.storage import append_marker
+
+    db_path = tmp_path / "markers.db"
+    open_main_window(
+        tk_root, _default_config(), _make_listener(), _make_obs(),
+        config_path=tmp_path / "config.json",
+        db_path=db_path,
+    )
+    tk_root.update()
+
+    win = [w for w in tk_root.winfo_children() if isinstance(w, tk.Toplevel)][0]
+    tree = _find_treeview(win)
+    assert len(tree.get_children()) == 0
+
+    append_marker(r"C:\rec\v.mkv", 5000, "New clip", "gameplay", db_path=db_path)
+    notify_new_marker()
+    tk_root.update()
+
+    assert len(tree.get_children()) == 1
+
+
+# ---------------------------------------------------------------------------
 # Markers tab - filter by recording
 # ---------------------------------------------------------------------------
 

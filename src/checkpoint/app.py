@@ -16,7 +16,7 @@ from checkpoint.categories import load_categories, save_categories
 from checkpoint.config import load_config
 from checkpoint.obs_client import ObsClient
 from checkpoint.popup import show_popup
-from checkpoint.main_window import open_main_window
+from checkpoint.main_window import notify_new_marker, open_main_window
 from checkpoint.storage import append_marker, init_db
 
 _WM_HOTKEY = 0x0312
@@ -196,6 +196,7 @@ def main() -> None:
         try:
             pending.get_nowait()
             callback()
+            notify_new_marker()
         except _queue.Empty:
             pass
         root.after(50, _poll)

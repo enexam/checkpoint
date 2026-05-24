@@ -3,7 +3,7 @@ import csv
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from checkpoint.categories import load_categories, save_categories
 from checkpoint.config import save_config
@@ -11,6 +11,15 @@ from checkpoint.storage import list_categories, list_recordings, query_markers
 
 # Module-level reference to the single open window instance (None when closed).
 _window: tk.Toplevel | None = None
+
+# Refresh callback for the Markers tab; set when the tab is built, cleared on close.
+_refresh_fn: Callable | None = None
+
+
+def notify_new_marker() -> None:
+    """Refresh the Markers tab if the main window is currently open."""
+    if _refresh_fn is not None:
+        _refresh_fn()
 
 
 def open_main_window(
@@ -57,8 +66,9 @@ def open_main_window(
     _window = win
 
     def _on_close() -> None:
-        global _window
+        global _window, _refresh_fn
         _window = None
+        _refresh_fn = None
         win.destroy()
 
     win.protocol("WM_DELETE_WINDOW", _on_close)
@@ -296,6 +306,9 @@ def _build_markers_tab(
 
     ttk.Button(filter_frame, text="Refresh", command=_refresh).pack(side="left")
 
+    recording_combo.bind("<<ComboboxSelected>>", lambda _e: _refresh())
+    category_combo.bind("<<ComboboxSelected>>", lambda _e: _refresh())
+
     def _select_all() -> None:
         tree.selection_set(tree.get_children())
 
@@ -329,5 +342,7 @@ def _build_markers_tab(
     ttk.Button(btn_frame, text="Unselect All", command=_unselect_all).pack(side="left", padx=(0, 4))
     ttk.Button(btn_frame, text="Export to CSV", command=_export_csv).pack(side="left")
 
-    # Populate on open.
+    # Register for new-marker notifications and populate on open.
+    global _refresh_fn
+    _refresh_fn = _refresh
     _refresh()
