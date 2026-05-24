@@ -31,6 +31,7 @@ def open_main_window(
     categories_path: Path | None = None,
     config_path: Path | None = None,
     db_path: Path | None = None,
+    on_quit: Callable | None = None,
 ) -> None:
     """Open the main Checkpoint window, or raise it if already open.
 
@@ -101,8 +102,12 @@ def open_main_window(
 
     def _quit() -> None:
         _on_close()
-        root.quit()
+        if on_quit is not None:
+            on_quit()
+        else:
+            root.quit()
 
+    ttk.Button(bottom_frame, text="Close (background)", command=_on_close).pack(side="right", padx=(0, 4))
     ttk.Button(bottom_frame, text="Quit", command=_quit).pack(side="right")
 
 
