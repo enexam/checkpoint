@@ -17,6 +17,12 @@ def test_main_is_callable():
     assert callable(main)
 
 
+def test_open_main_window_is_callable():
+    """open_main_window() exists and is callable (placeholder for task 3)."""
+    from checkpoint.app import open_main_window
+    assert callable(open_main_window)
+
+
 # Icon image
 
 def test_icon_image_is_64x64_rgba():

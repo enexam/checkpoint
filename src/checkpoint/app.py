@@ -16,7 +16,7 @@ from checkpoint.categories import load_categories, save_categories
 from checkpoint.config import load_config
 from checkpoint.obs_client import ObsClient
 from checkpoint.popup import show_popup
-from checkpoint.storage import append_marker
+from checkpoint.storage import append_marker, init_db
 
 _WM_HOTKEY = 0x0312
 _WM_QUIT = 0x0012
@@ -139,8 +139,14 @@ def _setup_logging() -> None:
     logging.info("Checkpoint starting")
 
 
+def open_main_window(*args, **kwargs) -> None:
+    """Placeholder — implemented in task 3."""
+
+
 def main() -> None:
     _setup_logging()
+    ctypes.windll.kernel32.SetConsoleTitleW("Checkpoint")
+    init_db()
     config = load_config()
     categories = load_categories()
 
@@ -149,6 +155,7 @@ def main() -> None:
 
     root = tk.Tk()
     root.withdraw()
+    root.title("Checkpoint")
     pending: _queue.Queue = _queue.Queue()
 
     hotkey_str = config.get("hotkey", "ctrl+f9")
@@ -161,6 +168,9 @@ def main() -> None:
     listener = _HotkeyListener(hotkey_str, _on_hotkey)
     listener.start()
 
+    def _open(icon: pystray.Icon, _item: object) -> None:
+        root.after(0, open_main_window)
+
     def _quit(icon: pystray.Icon, _item: object) -> None:
         icon.stop()
         root.quit()
@@ -169,7 +179,10 @@ def main() -> None:
         "Checkpoint",
         _make_icon_image(),
         title="Checkpoint",
-        menu=pystray.Menu(pystray.MenuItem("Quit", _quit)),
+        menu=pystray.Menu(
+            pystray.MenuItem("Open Checkpoint", _open),
+            pystray.MenuItem("Quit", _quit),
+        ),
     )
 
     def _poll() -> None:
@@ -178,10 +191,10 @@ def main() -> None:
             callback()
         except _queue.Empty:
             pass
-        root.after(100, _poll)
+        root.after(50, _poll)
 
     logging.info("systray running")
-    root.after(100, _poll)
+    root.after(50, _poll)
     icon.run_detached()
     root.mainloop()
 
