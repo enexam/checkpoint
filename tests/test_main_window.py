@@ -458,6 +458,8 @@ def _open_with_markers(tk_root, tmp_path, markers: list[dict]) -> tk.Toplevel:
             timestamp_ms=m["timestamp_ms"],
             description=m["description"],
             category=m["category"],
+            begin_timestamp_ms=m.get("begin_timestamp_ms", m["timestamp_ms"]),
+            duration_hint_ms=m.get("duration_hint_ms", 0),
             db_path=db_path,
         )
 
@@ -533,7 +535,7 @@ def test_notify_new_marker_refreshes_treeview(tk_root, tmp_path):
     tree = _find_treeview(win)
     assert len(tree.get_children()) == 0
 
-    append_marker(r"C:\rec\v.mkv", 5000, "New clip", "gameplay", db_path=db_path)
+    append_marker(r"C:\rec\v.mkv", 5000, "New clip", "gameplay", 5000, 0, db_path=db_path)
     notify_new_marker()
     tk_root.update()
 

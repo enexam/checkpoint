@@ -13,10 +13,11 @@ import pystray
 from PIL import Image, ImageDraw, ImageFont
 
 from checkpoint.categories import load_categories, save_categories
+from checkpoint.clip_explorer import notify_new_marker as _notify_clip_explorer, open_clip_explorer
 from checkpoint.config import load_config, save_config
 from checkpoint.obs_client import ObsClient
 from checkpoint.popup import show_popup
-from checkpoint.main_window import notify_new_marker, open_main_window
+from checkpoint.main_window import notify_new_marker as _notify_main_window, open_main_window
 from checkpoint.storage import append_marker, init_db
 
 _WM_HOTKEY = 0x0312
@@ -201,6 +202,9 @@ def main() -> None:
             root.quit()
         root.after(0, lambda: open_main_window(root, config, listener, obs, categories=categories, on_quit=_quit_app))
 
+    def _open_explorer(icon: pystray.Icon, _item: object) -> None:
+        root.after(0, lambda: open_clip_explorer(root))
+
     def _quit(icon: pystray.Icon, _item: object) -> None:
         icon.stop()
         root.quit()
@@ -211,6 +215,7 @@ def main() -> None:
         title="Checkpoint",
         menu=pystray.Menu(
             pystray.MenuItem("Open Checkpoint", _open),
+            pystray.MenuItem("Open Clip Explorer", _open_explorer),
             pystray.MenuItem("Quit", _quit),
         ),
     )
@@ -219,7 +224,8 @@ def main() -> None:
         try:
             pending.get_nowait()
             callback()
-            notify_new_marker()
+            _notify_main_window()
+            _notify_clip_explorer()
         except _queue.Empty:
             pass
         root.after(50, _poll)

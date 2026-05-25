@@ -185,6 +185,19 @@ def update_marker_boundaries(
         con.close()
 
 
+def delete_marker(
+    marker_id: int,
+    db_path: str | Path | None = None,
+) -> None:
+    path = _resolve_db_path(db_path)
+    con = sqlite3.connect(path)
+    try:
+        con.execute("DELETE FROM markers WHERE id = ?", (marker_id,))
+        con.commit()
+    finally:
+        con.close()
+
+
 def update_markers_category(
     marker_ids: list[int],
     category: str,
