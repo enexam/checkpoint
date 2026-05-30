@@ -10,6 +10,7 @@ dependencies = [
     "obsws-python",
     "pystray",
     "Pillow",
+    "python-vlc",
 ]
 
 [tool.setuptools.packages.find]

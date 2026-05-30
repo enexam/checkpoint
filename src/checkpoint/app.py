@@ -13,10 +13,11 @@ import pystray
 from PIL import Image, ImageDraw, ImageFont
 
 from checkpoint.categories import load_categories, save_categories
-from checkpoint.config import load_config
+from checkpoint.clip_explorer import notify_new_marker as _notify_clip_explorer, open_clip_explorer
+from checkpoint.config import load_config, save_config
 from checkpoint.obs_client import ObsClient
 from checkpoint.popup import show_popup
-from checkpoint.main_window import notify_new_marker, open_main_window
+from checkpoint.main_window import notify_new_marker as _notify_main_window, open_main_window
 from checkpoint.storage import append_marker, init_db
 
 _WM_HOTKEY = 0x0312
@@ -106,12 +107,24 @@ def _make_icon_image() -> Image.Image:
     return img
 
 
+def _preset_string(duration_hint_ms: int) -> str:
+    """Derive a preset string from a duration in milliseconds.
+
+    Returns one of "10s", "30s", "1m", "3m", "5m", or "custom:N" where N is
+    the number of whole seconds.
+    """
+    _canonical = {10_000: "10s", 30_000: "30s", 60_000: "1m", 180_000: "3m", 300_000: "5m"}
+    return _canonical.get(duration_hint_ms, f"custom:{duration_hint_ms // 1000}")
+
+
 def _make_hotkey_callback(
     obs: ObsClient,
     categories: list[str],
     show_popup_fn: Callable,
     append_marker_fn: Callable,
     save_cats_fn: Callable,
+    config: dict,
+    save_config_fn: Callable,
 ) -> Callable:
     def _on_hotkey() -> None:
         logging.debug("hotkey fired")
@@ -120,13 +133,21 @@ def _make_hotkey_callback(
             logging.debug("OBS not recording - skipping")
             return
         logging.debug("OBS recording: %s @ %d ms", snapshot["file_path"], snapshot["timestamp_ms"])
-        result = show_popup_fn(categories)
+        initial_preset = config.get("last_duration_preset", "30s")
+        result = show_popup_fn(categories, initial_preset)
         if result is None:
             logging.debug("popup cancelled")
             return
-        description, category = result
-        logging.info("marker: %r [%s] @ %d ms", description, category, snapshot["timestamp_ms"])
-        append_marker_fn(snapshot["file_path"], snapshot["timestamp_ms"], description, category)
+        description, category, duration_hint_ms = result
+        end_ms = snapshot["timestamp_ms"]
+        begin_ms = max(0, end_ms - duration_hint_ms)
+        logging.info(
+            "marker: %r [%s] @ %d ms (begin=%d, duration=%d ms)",
+            description, category, end_ms, begin_ms, duration_hint_ms,
+        )
+        append_marker_fn(snapshot["file_path"], end_ms, description, category, begin_ms, duration_hint_ms)
+        config["last_duration_preset"] = _preset_string(duration_hint_ms)
+        save_config_fn(config)
         if category and category not in categories:
             categories.append(category)
             save_cats_fn(categories)
@@ -167,7 +188,7 @@ def main() -> None:
 
     hotkey_str = config.get("hotkey", "ctrl+f9")
     logging.info("registering hotkey: %s", hotkey_str)
-    callback = _make_hotkey_callback(obs, categories, show_popup, append_marker, save_categories)
+    callback = _make_hotkey_callback(obs, categories, show_popup, append_marker, save_categories, config, save_config)
 
     def _on_hotkey() -> None:
         pending.put(True)
@@ -181,6 +202,9 @@ def main() -> None:
             root.quit()
         root.after(0, lambda: open_main_window(root, config, listener, obs, categories=categories, on_quit=_quit_app))
 
+    def _open_explorer(icon: pystray.Icon, _item: object) -> None:
+        root.after(0, lambda: open_clip_explorer(root))
+
     def _quit(icon: pystray.Icon, _item: object) -> None:
         icon.stop()
         root.quit()
@@ -191,6 +215,7 @@ def main() -> None:
         title="Checkpoint",
         menu=pystray.Menu(
             pystray.MenuItem("Open Checkpoint", _open),
+            pystray.MenuItem("Open Clip Explorer", _open_explorer),
             pystray.MenuItem("Quit", _quit),
         ),
     )
@@ -199,7 +224,8 @@ def main() -> None:
         try:
             pending.get_nowait()
             callback()
-            notify_new_marker()
+            _notify_main_window()
+            _notify_clip_explorer()
         except _queue.Empty:
             pass
         root.after(50, _poll)

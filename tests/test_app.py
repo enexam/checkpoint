@@ -41,17 +41,28 @@ def _make_mock_obs(snapshot):
     return obs
 
 
+def _make_cb(obs, categories, show_popup_mock, append_marker_mock, save_cats_mock,
+             config=None, save_config_mock=None):
+    from checkpoint.app import _make_hotkey_callback
+    if config is None:
+        config = {"last_duration_preset": "30s"}
+    if save_config_mock is None:
+        save_config_mock = MagicMock()
+    return _make_hotkey_callback(
+        obs, categories, show_popup_mock, append_marker_mock, save_cats_mock,
+        config, save_config_mock,
+    )
+
+
 def test_hotkey_callback_returns_early_when_no_snapshot():
     """Callback does nothing when get_snapshot() returns None."""
-    from checkpoint.app import _make_hotkey_callback
-
     obs = _make_mock_obs(None)
     show_popup = MagicMock()
     append_marker = MagicMock()
     save_cats = MagicMock()
     categories = []
 
-    cb = _make_hotkey_callback(obs, categories, show_popup, append_marker, save_cats)
+    cb = _make_cb(obs, categories, show_popup, append_marker, save_cats)
     cb()
 
     show_popup.assert_not_called()
@@ -61,15 +72,13 @@ def test_hotkey_callback_returns_early_when_no_snapshot():
 
 def test_hotkey_callback_returns_early_when_popup_cancelled():
     """Callback does nothing when show_popup() returns None."""
-    from checkpoint.app import _make_hotkey_callback
-
     obs = _make_mock_obs({"file_path": "C:/rec.mkv", "timestamp_ms": 1000})
     show_popup = MagicMock(return_value=None)
     append_marker = MagicMock()
     save_cats = MagicMock()
     categories = []
 
-    cb = _make_hotkey_callback(obs, categories, show_popup, append_marker, save_cats)
+    cb = _make_cb(obs, categories, show_popup, append_marker, save_cats)
     cb()
 
     append_marker.assert_not_called()
@@ -77,33 +86,79 @@ def test_hotkey_callback_returns_early_when_popup_cancelled():
 
 
 def test_hotkey_callback_appends_marker_on_happy_path():
-    """Callback calls append_marker with correct args when popup returns a result."""
-    from checkpoint.app import _make_hotkey_callback
-
+    """Callback calls append_marker with correct begin_ms and duration_hint_ms."""
     snapshot = {"file_path": "C:/rec.mkv", "timestamp_ms": 5000}
     obs = _make_mock_obs(snapshot)
-    show_popup = MagicMock(return_value=("great moment", "gameplay"))
+    # popup returns 3-tuple: (description, category, duration_hint_ms)
+    show_popup = MagicMock(return_value=("great moment", "gameplay", 30_000))
     append_marker = MagicMock()
     save_cats = MagicMock()
     categories = []
 
-    cb = _make_hotkey_callback(obs, categories, show_popup, append_marker, save_cats)
+    cb = _make_cb(obs, categories, show_popup, append_marker, save_cats)
     cb()
 
-    append_marker.assert_called_once_with("C:/rec.mkv", 5000, "great moment", "gameplay")
+    # begin_ms = max(0, 5000 - 30000) = 0
+    append_marker.assert_called_once_with("C:/rec.mkv", 5000, "great moment", "gameplay", 0, 30_000)
+
+
+def test_hotkey_callback_begin_ms_clamped_to_zero():
+    """begin_ms is clamped to 0 when end_ms < duration_hint_ms."""
+    snapshot = {"file_path": "C:/rec.mkv", "timestamp_ms": 1000}
+    obs = _make_mock_obs(snapshot)
+    show_popup = MagicMock(return_value=("note", "", 30_000))
+    append_marker = MagicMock()
+    save_cats = MagicMock()
+    categories = []
+
+    cb = _make_cb(obs, categories, show_popup, append_marker, save_cats)
+    cb()
+
+    append_marker.assert_called_once_with("C:/rec.mkv", 1000, "note", "", 0, 30_000)
+
+
+def test_hotkey_callback_begin_ms_computed_correctly():
+    """begin_ms = end_ms - duration_hint_ms when result >= 0."""
+    snapshot = {"file_path": "C:/rec.mkv", "timestamp_ms": 60_000}
+    obs = _make_mock_obs(snapshot)
+    show_popup = MagicMock(return_value=("note", "", 10_000))
+    append_marker = MagicMock()
+    save_cats = MagicMock()
+    categories = []
+
+    cb = _make_cb(obs, categories, show_popup, append_marker, save_cats)
+    cb()
+
+    append_marker.assert_called_once_with("C:/rec.mkv", 60_000, "note", "", 50_000, 10_000)
+
+
+def test_hotkey_callback_persists_preset_to_config():
+    """Callback writes last_duration_preset back to config after a successful marker."""
+    snapshot = {"file_path": "C:/rec.mkv", "timestamp_ms": 60_000}
+    obs = _make_mock_obs(snapshot)
+    show_popup = MagicMock(return_value=("note", "", 60_000))
+    append_marker = MagicMock()
+    save_cats = MagicMock()
+    save_config = MagicMock()
+    config = {"last_duration_preset": "30s"}
+    categories = []
+
+    cb = _make_cb(obs, categories, show_popup, append_marker, save_cats, config, save_config)
+    cb()
+
+    assert config["last_duration_preset"] == "1m"
+    save_config.assert_called_once_with(config)
 
 
 def test_hotkey_callback_appends_new_category_and_saves():
     """Callback adds a new non-empty category to the list and calls save_cats."""
-    from checkpoint.app import _make_hotkey_callback
-
     obs = _make_mock_obs({"file_path": "C:/rec.mkv", "timestamp_ms": 0})
-    show_popup = MagicMock(return_value=("note", "newcat"))
+    show_popup = MagicMock(return_value=("note", "newcat", 30_000))
     append_marker = MagicMock()
     save_cats = MagicMock()
     categories = ["existing"]
 
-    cb = _make_hotkey_callback(obs, categories, show_popup, append_marker, save_cats)
+    cb = _make_cb(obs, categories, show_popup, append_marker, save_cats)
     cb()
 
     assert "newcat" in categories
@@ -112,15 +167,13 @@ def test_hotkey_callback_appends_new_category_and_saves():
 
 def test_hotkey_callback_does_not_duplicate_existing_category():
     """Callback does not add a category that is already in the list."""
-    from checkpoint.app import _make_hotkey_callback
-
     obs = _make_mock_obs({"file_path": "C:/rec.mkv", "timestamp_ms": 0})
-    show_popup = MagicMock(return_value=("note", "existing"))
+    show_popup = MagicMock(return_value=("note", "existing", 30_000))
     append_marker = MagicMock()
     save_cats = MagicMock()
     categories = ["existing"]
 
-    cb = _make_hotkey_callback(obs, categories, show_popup, append_marker, save_cats)
+    cb = _make_cb(obs, categories, show_popup, append_marker, save_cats)
     cb()
 
     assert categories.count("existing") == 1
@@ -129,15 +182,13 @@ def test_hotkey_callback_does_not_duplicate_existing_category():
 
 def test_hotkey_callback_empty_category_does_not_save():
     """Callback does not call save_cats when the returned category is empty."""
-    from checkpoint.app import _make_hotkey_callback
-
     obs = _make_mock_obs({"file_path": "C:/rec.mkv", "timestamp_ms": 0})
-    show_popup = MagicMock(return_value=("note", ""))
+    show_popup = MagicMock(return_value=("note", "", 30_000))
     append_marker = MagicMock()
     save_cats = MagicMock()
     categories = []
 
-    cb = _make_hotkey_callback(obs, categories, show_popup, append_marker, save_cats)
+    cb = _make_cb(obs, categories, show_popup, append_marker, save_cats)
     cb()
 
     append_marker.assert_called_once()

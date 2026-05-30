@@ -75,11 +75,11 @@ def test_popup_module_importable():
 
 
 def test_show_popup_callable_with_correct_signature():
-    """show_popup accepts a list[str] and is callable."""
+    """show_popup accepts known_categories and an optional initial_preset."""
     from checkpoint.popup import show_popup
     sig = inspect.signature(show_popup)
     params = list(sig.parameters.keys())
-    assert params == ["known_categories"]
+    assert params == ["known_categories", "initial_preset"]
 
 
 # Dialog visibility regression: must not be transient to a withdrawn root
@@ -216,7 +216,10 @@ def test_ok_with_description_returns_tuple(tk_root):
 
     tk_root.after(80, _drive)
     result = show_popup(["gameplay", "bug"])
-    assert result == ("hello world", "gameplay")
+    assert result is not None
+    assert result[0] == "hello world"
+    assert result[1] == "gameplay"
+    assert len(result) == 3
 
 
 # Category can be empty string
@@ -240,7 +243,10 @@ def test_ok_with_empty_category_returns_empty_string(tk_root):
 
     tk_root.after(80, _drive)
     result = show_popup([])
-    assert result == ("my note", "")
+    assert result is not None
+    assert result[0] == "my note"
+    assert result[1] == ""
+    assert len(result) == 3
 
 
 # known_categories appear in combobox values
@@ -270,3 +276,175 @@ def test_combobox_has_known_categories(tk_root):
     assert combo_values[0] is not None
     for cat in cats:
         assert cat in combo_values[0]
+
+
+# Duration preset helpers
+
+def _find_radiobuttons(dialog: tk.Toplevel) -> list[tk.Radiobutton]:
+    """Return all Radiobutton widgets in the dialog (recursive)."""
+    result = []
+    def _collect(widget):
+        for w in widget.winfo_children():
+            if isinstance(w, tk.Radiobutton):
+                result.append(w)
+            _collect(w)
+    _collect(dialog)
+    return result
+
+
+# Default preset is 30s
+
+def test_default_duration_is_30s(tk_root):
+    """On first run (no preset arg), the 30s radio is selected."""
+    from checkpoint.popup import show_popup
+
+    desc_and_duration: list = [None]
+
+    def _drive():
+        dialog = _get_toplevel(tk_root)
+        if dialog is None:
+            tk_root.after(30, _drive)
+            return
+        entry = _find_entry(dialog)
+        if entry:
+            entry.insert(0, "test")
+        btn = _find_button(dialog, "OK")
+        if btn:
+            btn.invoke()
+
+    tk_root.after(80, _drive)
+    result = show_popup([])
+    assert result is not None
+    assert result[2] == 30_000
+
+
+# Preset radio buttons return correct ms values
+
+def test_preset_10s_returns_10000ms(tk_root):
+    """Selecting 10s preset returns duration_hint_ms == 10000."""
+    from checkpoint.popup import show_popup
+
+    def _drive():
+        dialog = _get_toplevel(tk_root)
+        if dialog is None:
+            tk_root.after(30, _drive)
+            return
+        rbs = _find_radiobuttons(dialog)
+        for rb in rbs:
+            if rb.cget("text") == "10s":
+                rb.invoke()
+                break
+        entry = _find_entry(dialog)
+        if entry:
+            entry.insert(0, "test")
+        btn = _find_button(dialog, "OK")
+        if btn:
+            btn.invoke()
+
+    tk_root.after(80, _drive)
+    result = show_popup([])
+    assert result is not None
+    assert result[2] == 10_000
+
+
+# initial_preset restores radio selection
+
+def test_initial_preset_1m_is_restored(tk_root):
+    """Passing initial_preset='1m' selects 1m and returns 60000ms."""
+    from checkpoint.popup import show_popup
+
+    def _drive():
+        dialog = _get_toplevel(tk_root)
+        if dialog is None:
+            tk_root.after(30, _drive)
+            return
+        entry = _find_entry(dialog)
+        if entry:
+            entry.insert(0, "test")
+        btn = _find_button(dialog, "OK")
+        if btn:
+            btn.invoke()
+
+    tk_root.after(80, _drive)
+    result = show_popup([], initial_preset="1m")
+    assert result is not None
+    assert result[2] == 60_000
+
+
+# Custom preset with valid entry
+
+def _find_all_entries(dialog: tk.Toplevel) -> list[tk.Entry]:
+    """Return all plain Entry widgets in the dialog (recursive, excludes Combobox)."""
+    entries = []
+    def _collect(widget):
+        for w in widget.winfo_children():
+            if isinstance(w, tk.Entry) and not isinstance(w, ttk.Combobox):
+                entries.append(w)
+            _collect(w)
+    _collect(dialog)
+    return entries
+
+
+def test_custom_preset_valid_entry(tk_root):
+    """Custom with a numeric entry returns that value * 1000."""
+    from checkpoint.popup import show_popup
+
+    def _drive():
+        dialog = _get_toplevel(tk_root)
+        if dialog is None:
+            tk_root.after(30, _drive)
+            return
+        # Click "Custom" radio
+        rbs = _find_radiobuttons(dialog)
+        for rb in rbs:
+            if rb.cget("text") == "Custom":
+                rb.invoke()
+                break
+        # entries[0] = description, entries[1] = custom seconds
+        entries = _find_all_entries(dialog)
+        if len(entries) >= 2:
+            entries[1].delete(0, "end")
+            entries[1].insert(0, "45")
+        if entries:
+            entries[0].delete(0, "end")
+            entries[0].insert(0, "test")
+        btn = _find_button(dialog, "OK")
+        if btn:
+            btn.invoke()
+
+    tk_root.after(80, _drive)
+    result = show_popup([])
+    assert result is not None
+    assert result[2] == 45_000
+
+
+# Custom preset with empty entry falls back to 30000ms
+
+def test_custom_preset_empty_entry_fallback(tk_root):
+    """Custom with empty entry falls back to 30000ms."""
+    from checkpoint.popup import show_popup
+
+    def _drive():
+        dialog = _get_toplevel(tk_root)
+        if dialog is None:
+            tk_root.after(30, _drive)
+            return
+        rbs = _find_radiobuttons(dialog)
+        for rb in rbs:
+            if rb.cget("text") == "Custom":
+                rb.invoke()
+                break
+        entries = _find_all_entries(dialog)
+        if len(entries) >= 2:
+            entries[1].delete(0, "end")  # leave empty
+        if entries:
+            entries[0].delete(0, "end")
+            entries[0].insert(0, "test")
+        btn = _find_button(dialog, "OK")
+        if btn:
+            btn.invoke()
+
+    tk_root.after(80, _drive)
+    result = show_popup([])
+    assert result is not None
+    assert result[2] == 30_000

@@ -11,6 +11,7 @@ _DEFAULTS: dict = {
     "obs_port": 4455,
     "obs_password": "",
     "hotkey": "ctrl+f9",
+    "last_duration_preset": "30s",
 }
 
 
