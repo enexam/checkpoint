@@ -6,6 +6,7 @@ from tkinter import ttk
 from typing import Any
 
 from checkpoint import storage
+from checkpoint.resources import set_window_icon
 
 try:
     import vlc  # type: ignore
@@ -91,6 +92,7 @@ class ClipExplorer(tk.Toplevel):
         super().__init__(root)
         self.title("Clip Explorer")
         self.resizable(True, True)
+        set_window_icon(self)
 
         self._db_path = db_path
         self._selected_marker_id: int | None = None

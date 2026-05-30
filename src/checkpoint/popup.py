@@ -6,6 +6,8 @@ dismisses, then returns (description, category, duration_hint_ms) or None.
 import tkinter as tk
 import tkinter.ttk as ttk
 
+from checkpoint.resources import set_window_icon
+
 _PRESET_MS: dict[str, int] = {
     "10s": 10_000,
     "30s": 30_000,
@@ -47,6 +49,7 @@ def show_popup(
     dialog = tk.Toplevel(root)
     dialog.title("Checkpoint")
     dialog.resizable(False, False)
+    set_window_icon(dialog)
     dialog.wm_attributes("-topmost", 1)
     dialog.grab_set()
 

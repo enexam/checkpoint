@@ -9,6 +9,7 @@ from typing import Any, Callable
 from checkpoint.categories import load_categories, save_categories
 from checkpoint.config import save_config
 from checkpoint import about, resolve_export
+from checkpoint.resources import set_window_icon
 from checkpoint.storage import delete_marker, list_categories, list_recordings, query_markers, update_markers_category
 
 # Module-level reference to the single open window instance (None when closed).
@@ -128,6 +129,7 @@ def open_main_window(
     win = tk.Toplevel(root)
     win.title("Checkpoint")
     win.resizable(True, True)
+    set_window_icon(win)
     _window = win
 
     def _on_close() -> None:

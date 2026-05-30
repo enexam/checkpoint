@@ -18,6 +18,7 @@ from checkpoint.config import load_config, save_config
 from checkpoint.obs_client import ObsClient
 from checkpoint.popup import show_popup
 from checkpoint.main_window import notify_new_marker as _notify_main_window, open_main_window
+from checkpoint.resources import icon_png_path
 from checkpoint.storage import append_marker, init_db
 
 _WM_HOTKEY = 0x0312
@@ -97,6 +98,9 @@ class _HotkeyListener:
 
 
 def _make_icon_image() -> Image.Image:
+    png = icon_png_path()
+    if png.exists():
+        return Image.open(png).convert("RGBA").resize((64, 64))
     img = Image.new("RGBA", (64, 64), color=(0x1A, 0x1A, 0x2E, 255))
     draw = ImageDraw.Draw(img)
     try:
