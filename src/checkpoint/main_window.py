@@ -8,7 +8,7 @@ from typing import Any, Callable
 
 from checkpoint.categories import load_categories, save_categories
 from checkpoint.config import save_config
-from checkpoint import resolve_export
+from checkpoint import about, resolve_export
 from checkpoint.storage import delete_marker, list_categories, list_recordings, query_markers, update_markers_category
 
 # Module-level reference to the single open window instance (None when closed).
@@ -92,6 +92,7 @@ def open_main_window(
     config_path: Path | None = None,
     db_path: Path | None = None,
     on_quit: Callable | None = None,
+    initial_tab: str | None = None,
 ) -> None:
     """Open the main Checkpoint window, or raise it if already open.
 
@@ -111,6 +112,9 @@ def open_main_window(
         Optional override for the config.json path (used in tests).
     db_path:
         Optional override for the markers.db path (used in tests).
+    initial_tab:
+        If not None, selects the notebook tab whose text matches this string after
+        all tabs are built. Used by systray menu items to open directly to a tab.
     """
     global _window
 
@@ -155,6 +159,18 @@ def open_main_window(
     markers_frame = ttk.Frame(notebook)
     notebook.add(markers_frame, text="Markers")
     _build_markers_tab(markers_frame, db_path=db_path, config=config, config_path=config_path)
+
+    # --- About tab ---
+    about_frame = ttk.Frame(notebook)
+    notebook.add(about_frame, text="About")
+    about.build_about_tab(about_frame)
+
+    # Select initial tab if requested.
+    if initial_tab is not None:
+        for tab_id in notebook.tabs():
+            if notebook.tab(tab_id, "text") == initial_tab:
+                notebook.select(tab_id)
+                break
 
     # --- Bottom bar ---
     bottom_frame = ttk.Frame(win)

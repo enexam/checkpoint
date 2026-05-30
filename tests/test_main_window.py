@@ -967,3 +967,74 @@ def test_delete_key_on_tree_deletes_selection(tk_root, tmp_path):
 
     from checkpoint.storage import query_markers
     assert len(query_markers(db_path=db_path)) == 0
+
+
+# ---------------------------------------------------------------------------
+# About tab
+# ---------------------------------------------------------------------------
+
+def test_main_window_has_three_tabs(tk_root, tmp_path):
+    """The main window notebook must have exactly three tabs: Settings, Markers, About."""
+    from checkpoint.main_window import open_main_window
+    from tkinter import ttk
+
+    open_main_window(
+        tk_root, _default_config(), _make_listener(), _make_obs(),
+        config_path=tmp_path / "config.json",
+        db_path=tmp_path / "markers.db",
+    )
+    tk_root.update()
+
+    win = [w for w in tk_root.winfo_children() if isinstance(w, tk.Toplevel)][0]
+    notebooks = _find_widgets(win, ttk.Notebook)
+    assert notebooks, "No Notebook found in window"
+    nb = notebooks[0]
+    tab_texts = [nb.tab(t, "text") for t in nb.tabs()]
+    assert "Settings" in tab_texts
+    assert "Markers" in tab_texts
+    assert "About" in tab_texts
+    assert len(tab_texts) == 3
+
+
+def test_about_tab_renders_without_error(tk_root, tmp_path):
+    """The About tab must render without raising an exception."""
+    from checkpoint.main_window import open_main_window
+    from tkinter import ttk
+
+    open_main_window(
+        tk_root, _default_config(), _make_listener(), _make_obs(),
+        config_path=tmp_path / "config.json",
+        db_path=tmp_path / "markers.db",
+    )
+    tk_root.update()
+
+    win = [w for w in tk_root.winfo_children() if isinstance(w, tk.Toplevel)][0]
+    notebooks = _find_widgets(win, ttk.Notebook)
+    nb = notebooks[0]
+    # Select the About tab and update.
+    for t in nb.tabs():
+        if nb.tab(t, "text") == "About":
+            nb.select(t)
+            break
+    tk_root.update()
+    # No exception means pass.
+
+
+def test_initial_tab_about_selects_about(tk_root, tmp_path):
+    """open_main_window(..., initial_tab='About') must select the About tab."""
+    from checkpoint.main_window import open_main_window
+    from tkinter import ttk
+
+    open_main_window(
+        tk_root, _default_config(), _make_listener(), _make_obs(),
+        config_path=tmp_path / "config.json",
+        db_path=tmp_path / "markers.db",
+        initial_tab="About",
+    )
+    tk_root.update()
+
+    win = [w for w in tk_root.winfo_children() if isinstance(w, tk.Toplevel)][0]
+    notebooks = _find_widgets(win, ttk.Notebook)
+    nb = notebooks[0]
+    selected_text = nb.tab(nb.select(), "text")
+    assert selected_text == "About"
