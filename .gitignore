@@ -1,4 +1,13 @@
-__pycache__/
-**/*.pyc
-**/*.pyo
-checkpoint.egg-info/
+﻿__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.eggs/
+dist/
+build/
+*.spec
+.venv/
+venv/
+.vscode/
+
