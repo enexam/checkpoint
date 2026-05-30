@@ -9,7 +9,7 @@ from typing import Any, Callable
 from checkpoint.categories import load_categories, save_categories
 from checkpoint.config import save_config
 from checkpoint import resolve_export
-from checkpoint.storage import list_categories, list_recordings, query_markers, update_markers_category
+from checkpoint.storage import delete_marker, list_categories, list_recordings, query_markers, update_markers_category
 
 # Module-level reference to the single open window instance (None when closed).
 _window: tk.Toplevel | None = None
@@ -401,6 +401,19 @@ def _build_markers_tab(
     def _unselect_all() -> None:
         tree.selection_set([])
 
+    def _delete_selected() -> None:
+        selected = tree.selection()
+        if not selected:
+            messagebox.showwarning("No selection", "Select at least one row before deleting.")
+            return
+        n = len(selected)
+        if not messagebox.askyesno("Delete markers", f"Delete {n} marker(s)?"):
+            return
+        for item_id in selected:
+            marker_id = int(tree.item(item_id, "values")[6])
+            delete_marker(marker_id, db_path=db_path)
+        _refresh()
+
     def _export_csv() -> None:
         selected = tree.selection()
         if not selected:
@@ -495,8 +508,10 @@ def _build_markers_tab(
 
     ttk.Button(btn_frame, text="Select All", command=_select_all).pack(side="left", padx=(0, 4))
     ttk.Button(btn_frame, text="Unselect All", command=_unselect_all).pack(side="left", padx=(0, 4))
+    ttk.Button(btn_frame, text="Delete", command=_delete_selected).pack(side="left", padx=(0, 4))
     ttk.Button(btn_frame, text="Export to CSV", command=_export_csv).pack(side="left", padx=(0, 4))
     ttk.Button(btn_frame, text="Export to DaVinci Resolve (.edl)", command=_export_edl).pack(side="left")
+    tree.bind("<Delete>", lambda _e: _delete_selected())
 
     # Set category row
     set_cat_combo = ttk.Combobox(set_cat_frame, textvariable=set_cat_var, state="normal", width=18)

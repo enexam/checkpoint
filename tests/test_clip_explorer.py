@@ -1055,3 +1055,75 @@ def test_arrow_key_updates_loop_bounds(tk_root, db_path, mock_vlc, tmp_path):
     tk_root.update()
     # Should NOT seek because we're before the new end
     assert len(mock_vlc.set_time_calls) == 0
+
+
+# ---------------------------------------------------------------------------
+# Delete key in Clip Explorer
+# ---------------------------------------------------------------------------
+
+def test_delete_key_deletes_selected_marker(tk_root, db_path):
+    """<Delete> key with a selected marker calls _on_delete and removes it from DB."""
+    _insert_marker(db_path, "C:/rec.mkv", 30_000, 0, "to delete", "gameplay")
+
+    from checkpoint.clip_explorer import open_clip_explorer
+    open_clip_explorer(tk_root, db_path=db_path)
+    tk_root.update()
+
+    import checkpoint.clip_explorer as ce
+    win = ce._window
+
+    rows = win._tree.get_children()
+    win._tree.selection_set(rows[0])
+    win._on_marker_select(None)
+    tk_root.update()
+
+    assert win._selected_marker_id is not None
+    win._on_delete_key()
+    tk_root.update()
+
+    from checkpoint.storage import query_markers
+    assert len(query_markers(db_path=db_path)) == 0
+
+
+def test_delete_key_no_op_with_no_selection(tk_root, db_path):
+    """<Delete> key with no marker selected is a no-op."""
+    _insert_marker(db_path, "C:/rec.mkv", 30_000, 0, "stay", "")
+
+    from checkpoint.clip_explorer import open_clip_explorer
+    open_clip_explorer(tk_root, db_path=db_path)
+    tk_root.update()
+
+    import checkpoint.clip_explorer as ce
+    win = ce._window
+
+    assert win._selected_marker_id is None
+    win._on_delete_key()
+    tk_root.update()
+
+    from checkpoint.storage import query_markers
+    assert len(query_markers(db_path=db_path)) == 1
+
+
+def test_delete_key_no_op_with_entry_focus(tk_root, db_path):
+    """<Delete> key is a no-op when an Entry widget has focus."""
+    _insert_marker(db_path, "C:/rec.mkv", 30_000, 0, "stay", "")
+
+    from checkpoint.clip_explorer import open_clip_explorer
+    open_clip_explorer(tk_root, db_path=db_path)
+    tk_root.update()
+
+    import checkpoint.clip_explorer as ce
+    win = ce._window
+
+    rows = win._tree.get_children()
+    win._tree.selection_set(rows[0])
+    win._on_marker_select(None)
+    tk_root.update()
+
+    # Monkeypatch focus_get to return an Entry, simulating Entry focus.
+    win.focus_get = lambda: win._begin_entry
+    win._on_delete_key()
+    tk_root.update()
+
+    from checkpoint.storage import query_markers
+    assert len(query_markers(db_path=db_path)) == 1

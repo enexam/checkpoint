@@ -117,6 +117,7 @@ class ClipExplorer(tk.Toplevel):
         self.bind("<Control-Right>", lambda e: self._on_arrow_key(e, +1))
         self.bind("<Shift-Left>", lambda e: self._on_arrow_key(e, -1))
         self.bind("<Shift-Right>", lambda e: self._on_arrow_key(e, +1))
+        self.bind("<Delete>", self._on_delete_key)
 
     # ------------------------------------------------------------------
     # UI construction
@@ -573,6 +574,14 @@ class ClipExplorer(tk.Toplevel):
             self._player.stop()
             self._play_btn.configure(text="Play")
         self.load_markers()
+
+    def _on_delete_key(self, _event: Any = None) -> None:
+        """Handle the Delete key: no-op if an Entry has focus or no marker is selected."""
+        if isinstance(self.focus_get(), tk.Entry):
+            return
+        if self._selected_marker_id is None:
+            return
+        self._on_delete()
 
     def _on_seeker_press(self) -> None:
         self._seeking = True

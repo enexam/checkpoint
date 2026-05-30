@@ -857,3 +857,113 @@ def test_export_edl_persists_fps_to_config(tk_root, tmp_path):
     assert config_path.exists()
     saved = json.loads(config_path.read_text(encoding="utf-8"))
     assert saved.get("last_export_fps") == 30
+
+
+# ---------------------------------------------------------------------------
+# Markers tab - delete selected
+# ---------------------------------------------------------------------------
+
+def test_delete_no_selection_shows_warning(tk_root, tmp_path):
+    """'Delete' with no selection shows a warning, no confirm dialog, DB unchanged."""
+    markers = [
+        {"file_path": r"C:\rec\v.mkv", "timestamp_ms": 1000, "description": "A", "category": "x"},
+    ]
+    db_path = tmp_path / "markers.db"
+    win = _open_with_markers(tk_root, tmp_path, markers)
+
+    with patch("tkinter.messagebox.showwarning") as mock_warn, \
+         patch("tkinter.messagebox.askyesno") as mock_ask:
+        _click_button(win, "Delete")
+        mock_warn.assert_called_once()
+        mock_ask.assert_not_called()
+
+    from checkpoint.storage import query_markers
+    assert len(query_markers(db_path=db_path)) == 1
+
+
+def test_delete_confirm_no_does_not_delete(tk_root, tmp_path):
+    """'Delete' with a selection but confirming 'No' leaves DB unchanged."""
+    markers = [
+        {"file_path": r"C:\rec\v.mkv", "timestamp_ms": 1000, "description": "A", "category": "x"},
+    ]
+    db_path = tmp_path / "markers.db"
+    win = _open_with_markers(tk_root, tmp_path, markers)
+    tree = _find_treeview(win)
+    tree.selection_set(tree.get_children())
+
+    with patch("tkinter.messagebox.askyesno", return_value=False):
+        _click_button(win, "Delete")
+
+    from checkpoint.storage import query_markers
+    assert len(query_markers(db_path=db_path)) == 1
+
+
+def test_delete_selected_removes_rows_from_db(tk_root, tmp_path):
+    """Deleting a selection removes those rows and leaves others in the DB."""
+    markers = [
+        {"file_path": r"C:\rec\v.mkv", "timestamp_ms": 1000, "description": "Keep", "category": "x"},
+        {"file_path": r"C:\rec\v.mkv", "timestamp_ms": 2000, "description": "Delete1", "category": "x"},
+        {"file_path": r"C:\rec\v.mkv", "timestamp_ms": 3000, "description": "Delete2", "category": "x"},
+    ]
+    db_path = tmp_path / "markers.db"
+    win = _open_with_markers(tk_root, tmp_path, markers)
+    tree = _find_treeview(win)
+
+    # Select the last two rows.
+    all_items = tree.get_children()
+    tree.selection_set(list(all_items[1:]))
+
+    with patch("tkinter.messagebox.askyesno", return_value=True):
+        _click_button(win, "Delete")
+    tk_root.update()
+
+    from checkpoint.storage import query_markers
+    remaining = query_markers(db_path=db_path)
+    assert len(remaining) == 1
+    assert remaining[0]["description"] == "Keep"
+
+
+def test_delete_selected_removes_from_tree(tk_root, tmp_path):
+    """After deletion, removed rows are gone from the Treeview."""
+    markers = [
+        {"file_path": r"C:\rec\v.mkv", "timestamp_ms": 1000, "description": "A", "category": "x"},
+        {"file_path": r"C:\rec\v.mkv", "timestamp_ms": 2000, "description": "B", "category": "x"},
+    ]
+    win = _open_with_markers(tk_root, tmp_path, markers)
+    tree = _find_treeview(win)
+    tree.selection_set(tree.get_children())
+
+    with patch("tkinter.messagebox.askyesno", return_value=True):
+        _click_button(win, "Delete")
+    tk_root.update()
+
+    assert len(tree.get_children()) == 0
+
+
+def test_delete_key_binding_registered_on_tree(tk_root, tmp_path):
+    """The <Delete> key is bound on the Markers tree."""
+    win = _open_with_markers(tk_root, tmp_path, [])
+    tree = _find_treeview(win)
+    assert tree.bind("<Delete>"), "<Delete> binding not registered on tree"
+
+
+def test_delete_key_on_tree_deletes_selection(tk_root, tmp_path):
+    """The <Delete> key on the Markers tree calls the delete handler (via button proxy)."""
+    markers = [
+        {"file_path": r"C:\rec\v.mkv", "timestamp_ms": 1000, "description": "A", "category": "x"},
+        {"file_path": r"C:\rec\v.mkv", "timestamp_ms": 2000, "description": "B", "category": "x"},
+    ]
+    db_path = tmp_path / "markers.db"
+    win = _open_with_markers(tk_root, tmp_path, markers)
+    tree = _find_treeview(win)
+    tree.selection_set(tree.get_children())
+
+    # In headless mode event_generate can fail to deliver; use the Delete button
+    # (same handler) to verify end-to-end deletion, and separately assert binding exists.
+    assert tree.bind("<Delete>"), "<Delete> binding not registered on tree"
+    with patch("tkinter.messagebox.askyesno", return_value=True):
+        _click_button(win, "Delete")
+    tk_root.update()
+
+    from checkpoint.storage import query_markers
+    assert len(query_markers(db_path=db_path)) == 0
