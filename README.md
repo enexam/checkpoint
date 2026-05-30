@@ -43,12 +43,12 @@ The Checkpoint icon appears in the system tray. The app runs in the background a
    python -m checkpoint
    ```
 
-### The Hotkey
+### Hotkey
 
 By default, the hotkey is **Ctrl+F9**. You can change it by editing the configuration file (see Configuration below).
 
 When you press the hotkey:
-- If OBS is not recording, nothing happens.
+- If OBS is not recording, a notification balloon appears in the system tray saying "OBS is not recording".
 - If OBS is recording, a popup window appears. Fill in:
   - **Description** (required, non-empty)
   - **Category** (optional; you can type freely or select from previously used categories)
@@ -59,7 +59,13 @@ The marker is recorded in the SQLite database. Your last-used duration preset is
 
 ### Main Window and Clip Explorer
 
-You can open two windows from the system tray:
+Right-clicking the system tray icon opens a menu with these items:
+
+- **Open Checkpoint**: open the main window (Settings, Markers, and About tabs).
+- **Open Clip Explorer**: open the Clip Explorer window.
+- **About**: open the main window focused on the About tab.
+- **Report a Bug**: open the main window focused on the About tab (where the Report a Bug / Request a Feature links live).
+- **Quit**: exit Checkpoint.
 
 #### Main Window (Click "Open Checkpoint")
 
@@ -77,6 +83,13 @@ The main window has two tabs:
 - **Refresh**: Reload markers from the database based on the current filters.
 - **Select All / Unselect All**: Quickly select or deselect all visible (filtered) markers.
 - **Export to CSV**: Export the selected markers to a CSV file. A file dialog will appear to let you choose where to save the file.
+- **Export to DaVinci Resolve (.edl)**: Export selected markers as an EDL file that can be imported into DaVinci Resolve. Select one or more markers and click the button to open an options dialog:
+  - **FPS**: Choose the frame rate (24, 25, 30, 50, or 60) to match your Resolve timeline. Your last choice is remembered.
+  - **Timeline start TC**: Specify the timeline's start timecode (default `01:00:00:00`). Markers are positioned relative to this timecode.
+  - **Important**: The fps must match your Resolve timeline's frame rate, or markers will land proportionally off. Integer fps only (no 29.97 or 59.94 support); sources using fractional frame rates drift slightly (~3.6 s/hr).
+  - One .edl file is created per recording file. Markers become Resolve markers at their begin timestamp with the duration spanning from begin to end; the description becomes the marker name, and the category determines the marker color.
+  - To import in Resolve: right-click the timeline in the Media Pool → Timelines → Import → Timeline Markers from EDL, and select the .edl file.
+- **Delete**: Remove selected markers after confirmation. You can also press **Del** to delete the current selection.
 
 #### Clip Explorer (Click "Open Clip Explorer")
 
@@ -101,6 +114,19 @@ The Clip Explorer window allows you to review and adjust individual clips. Featu
 
 Each boundary adjustment is saved to the database immediately, so you can close and reopen the explorer without losing changes.
 
+#### About Tab
+
+The About tab displays:
+- **Version**: The current Checkpoint version (dev builds show `0.0.0`; release builds derive the version from the git tag).
+- **License**: GPL-3.0 license information and links.
+- **Actions**:
+  - **GitHub Repository**: Opens the project's GitHub page.
+  - **Report a Bug**: Opens a pre-filled GitHub issue form with your Checkpoint version, OS, and Python version automatically included.
+  - **Request a Feature**: Opens a pre-filled GitHub feature request form.
+  - **Contribute**: Links to the contribution guide.
+  - **Open Data Folder**: Opens `%APPDATA%\Checkpoint` so you can access `checkpoint.log` (useful when reporting bugs).
+- **Acknowledgements**: Credits for the open-source libraries and tools that power Checkpoint.
+
 ### Configuration
 
 Configuration is stored in `%APPDATA%\Checkpoint\config.json`. On first run, this file is created with defaults:
@@ -111,7 +137,8 @@ Configuration is stored in `%APPDATA%\Checkpoint\config.json`. On first run, thi
   "obs_port": 4455,
   "obs_password": "",
   "hotkey": "ctrl+f9",
-  "last_duration_preset": "30s"
+  "last_duration_preset": "30s",
+  "last_export_fps": 60
 }
 ```
 
@@ -121,6 +148,7 @@ You can configure these settings via the Settings tab in the main window:
 - **obs_password**: WebSocket server password if set (default: empty)
 - **hotkey**: global hotkey string (default: `ctrl+f9`; use syntax like `ctrl+f9`, `alt+shift+c`, etc.)
 - **last_duration_preset**: the duration preset to use next time the hotkey popup appears (automatically updated)
+- **last_export_fps**: the frame rate to use by default in the DaVinci Resolve EDL export dialog (automatically updated, default: 60)
 
 Changes made in the Settings tab take effect immediately without restarting the app. You can also manage categories in the Settings tab; they are automatically suggested in the hotkey popup.
 
@@ -157,3 +185,15 @@ You can export selected markers to CSV from the Markers tab. The exported CSV us
 #### Known Categories
 
 Previously used categories are stored in `%APPDATA%\Checkpoint\categories.json`. This file is created automatically and updated whenever you enter a new category in the popup or via the Settings tab.
+
+### Versioning and Releases
+
+**Development builds** report version `0.0.0`. This is the default value in the source code.
+
+**Release builds** derive the version from the git tag at release time. When you create a git tag like `v1.0.0`, the automated release workflow:
+1. Checks out the tagged commit
+2. Rewrites the `__version__` string in `src/checkpoint/__init__.py` to `1.0.0` (stripping the `v` prefix)
+3. Builds the Windows exe via PyInstaller
+4. Uploads the exe to the GitHub release
+
+The exe will report the corresponding version in the About tab and in bug/feature reports. You can also see the version by running `python -c "import checkpoint; print(checkpoint.__version__)"` (or just check the About tab in the app).
