@@ -731,3 +731,129 @@ def test_quit_button_calls_root_quit(tk_root, tmp_path):
     with patch.object(tk_root, "quit") as mock_quit:
         _click_button(win, "Quit")
         mock_quit.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Markers tab - export to DaVinci Resolve (.edl)
+# ---------------------------------------------------------------------------
+
+def test_export_edl_no_selection_shows_warning(tk_root, tmp_path):
+    """'Export to DaVinci Resolve (.edl)' with no rows selected shows a warning and opens no dialog."""
+    win = _open_with_markers(tk_root, tmp_path, [])
+
+    with patch("tkinter.messagebox.showwarning") as mock_warn, \
+         patch("tkinter.filedialog.asksaveasfilename") as mock_save, \
+         patch("checkpoint.main_window._ask_edl_options") as mock_ask:
+        _click_button(win, "Export to DaVinci Resolve (.edl)")
+        mock_warn.assert_called_once()
+        mock_save.assert_not_called()
+        mock_ask.assert_not_called()
+
+
+def test_export_edl_single_recording_writes_file(tk_root, tmp_path):
+    """Single-recording selection writes one .edl whose content matches markers_to_edl."""
+    from checkpoint.resolve_export import markers_to_edl
+    from checkpoint.storage import query_markers
+
+    markers_data = [
+        {
+            "file_path": r"C:\rec\video1.mkv",
+            "timestamp_ms": 30000,
+            "begin_timestamp_ms": 10000,
+            "description": "Clip A",
+            "category": "gameplay",
+        },
+        {
+            "file_path": r"C:\rec\video1.mkv",
+            "timestamp_ms": 60000,
+            "begin_timestamp_ms": 30000,
+            "description": "Clip B",
+            "category": "bug",
+        },
+    ]
+    db_path = tmp_path / "markers.db"
+    win = _open_with_markers(tk_root, tmp_path, markers_data)
+
+    _click_button(win, "Select All")
+
+    out_file = str(tmp_path / "video1.edl")
+    with patch("checkpoint.main_window._ask_edl_options", return_value=(60, "01:00:00:00")), \
+         patch("tkinter.filedialog.asksaveasfilename", return_value=out_file):
+        _click_button(win, "Export to DaVinci Resolve (.edl)")
+
+    assert (tmp_path / "video1.edl").exists()
+
+    # Re-query markers by id to get begin_timestamp_ms, same as the implementation does.
+    all_rows = query_markers(db_path=db_path)
+    rows_by_id = {r["id"]: r for r in all_rows}
+    group = [rows_by_id[r["id"]] for r in all_rows if r["file_path"] == r"C:\rec\video1.mkv"]
+
+    expected = markers_to_edl(group, fps=60, start_tc="01:00:00:00", title="video1")
+
+    with open(out_file, "r", newline="", encoding="utf-8") as fh:
+        actual = fh.read()
+    assert actual == expected
+
+
+def test_export_edl_two_recordings_writes_two_files(tk_root, tmp_path):
+    """Multi-recording selection writes one .edl per recording and shows a summary."""
+    markers_data = [
+        {
+            "file_path": r"C:\rec\video1.mkv",
+            "timestamp_ms": 30000,
+            "begin_timestamp_ms": 10000,
+            "description": "Clip A",
+            "category": "gameplay",
+        },
+        {
+            "file_path": r"C:\rec\video2.mkv",
+            "timestamp_ms": 20000,
+            "begin_timestamp_ms": 5000,
+            "description": "Clip B",
+            "category": "bug",
+        },
+    ]
+    win = _open_with_markers(tk_root, tmp_path, markers_data)
+    out_dir = str(tmp_path / "edl_out")
+    import os
+    os.makedirs(out_dir, exist_ok=True)
+
+    _click_button(win, "Select All")
+
+    with patch("checkpoint.main_window._ask_edl_options", return_value=(60, "01:00:00:00")), \
+         patch("tkinter.filedialog.askdirectory", return_value=out_dir), \
+         patch("tkinter.messagebox.showinfo") as mock_info:
+        _click_button(win, "Export to DaVinci Resolve (.edl)")
+        mock_info.assert_called_once()
+
+    assert (tmp_path / "edl_out" / "video1.edl").exists()
+    assert (tmp_path / "edl_out" / "video2.edl").exists()
+
+
+def test_export_edl_persists_fps_to_config(tk_root, tmp_path):
+    """The chosen fps is written to config after export."""
+    import json
+
+    markers_data = [
+        {
+            "file_path": r"C:\rec\video1.mkv",
+            "timestamp_ms": 30000,
+            "begin_timestamp_ms": 10000,
+            "description": "Clip",
+            "category": "x",
+        },
+    ]
+    config_path = tmp_path / "config.json"
+    win = _open_with_markers(tk_root, tmp_path, markers_data)
+
+    _click_button(win, "Select All")
+
+    out_file = str(tmp_path / "video1.edl")
+    with patch("checkpoint.main_window._ask_edl_options", return_value=(30, "01:00:00:00")), \
+         patch("tkinter.filedialog.asksaveasfilename", return_value=out_file):
+        _click_button(win, "Export to DaVinci Resolve (.edl)")
+
+    # Config file must be written (or already exist) with last_export_fps = 30.
+    assert config_path.exists()
+    saved = json.loads(config_path.read_text(encoding="utf-8"))
+    assert saved.get("last_export_fps") == 30

@@ -1,12 +1,14 @@
 """Main application window with Settings and Markers tabs."""
 import csv
 import tkinter as tk
+from collections import defaultdict
 from tkinter import filedialog, messagebox, ttk
 from pathlib import Path
 from typing import Any, Callable
 
 from checkpoint.categories import load_categories, save_categories
 from checkpoint.config import save_config
+from checkpoint import resolve_export
 from checkpoint.storage import list_categories, list_recordings, query_markers, update_markers_category
 
 # Module-level reference to the single open window instance (None when closed).
@@ -14,6 +16,64 @@ _window: tk.Toplevel | None = None
 
 # Refresh callback for the Markers tab; set when the tab is built, cleared on close.
 _refresh_fn: Callable | None = None
+
+_EDL_FPS_OPTIONS: list[str] = ["24", "25", "30", "50", "60"]
+
+
+def _ask_edl_options(parent: tk.Misc, initial_fps: int) -> tuple[int, str] | None:
+    """Show a small modal dialog to collect EDL export options.
+
+    Parameters
+    ----------
+    parent:
+        Parent window for the modal dialog.
+    initial_fps:
+        Default fps selection (from config).
+
+    Returns
+    -------
+    tuple[int, str] or None
+        ``(fps, start_tc)`` on OK, ``None`` on cancel.
+    """
+    result: list[tuple[int, str]] = []
+
+    dialog = tk.Toplevel(parent)
+    dialog.title("EDL Export Options")
+    dialog.resizable(False, False)
+    dialog.grab_set()
+
+    ttk.Label(dialog, text="FPS (must match Resolve timeline):").grid(
+        row=0, column=0, sticky="w", padx=8, pady=(8, 2)
+    )
+    fps_var = tk.StringVar(value=str(initial_fps) if str(initial_fps) in _EDL_FPS_OPTIONS else "60")
+    fps_combo = ttk.Combobox(dialog, textvariable=fps_var, values=_EDL_FPS_OPTIONS, state="readonly", width=8)
+    fps_combo.grid(row=0, column=1, sticky="w", padx=8, pady=(8, 2))
+
+    ttk.Label(dialog, text="Timeline start TC:").grid(
+        row=1, column=0, sticky="w", padx=8, pady=(2, 2)
+    )
+    tc_var = tk.StringVar(value="01:00:00:00")
+    ttk.Entry(dialog, textvariable=tc_var, width=14).grid(row=1, column=1, sticky="w", padx=8, pady=(2, 2))
+
+    ttk.Label(dialog, text="FPS must match your DaVinci Resolve timeline.", foreground="gray").grid(
+        row=2, column=0, columnspan=2, sticky="w", padx=8, pady=(0, 4)
+    )
+
+    btn_frame = ttk.Frame(dialog)
+    btn_frame.grid(row=3, column=0, columnspan=2, pady=(0, 8))
+
+    def _ok() -> None:
+        result.append((int(fps_var.get()), tc_var.get().strip()))
+        dialog.destroy()
+
+    def _cancel() -> None:
+        dialog.destroy()
+
+    ttk.Button(btn_frame, text="OK", command=_ok).pack(side="left", padx=4)
+    ttk.Button(btn_frame, text="Cancel", command=_cancel).pack(side="left", padx=4)
+
+    dialog.wait_window()
+    return result[0] if result else None
 
 
 def notify_new_marker() -> None:
@@ -94,7 +154,7 @@ def open_main_window(
     # --- Markers tab ---
     markers_frame = ttk.Frame(notebook)
     notebook.add(markers_frame, text="Markers")
-    _build_markers_tab(markers_frame, db_path=db_path)
+    _build_markers_tab(markers_frame, db_path=db_path, config=config, config_path=config_path)
 
     # --- Bottom bar ---
     bottom_frame = ttk.Frame(win)
@@ -237,6 +297,8 @@ def _build_settings_tab(
 def _build_markers_tab(
     parent: ttk.Frame,
     db_path: Path | None,
+    config: dict | None = None,
+    config_path: Path | None = None,
 ) -> None:
     """Populate the Markers tab with filter row, Treeview, and action buttons."""
 
@@ -362,9 +424,79 @@ def _build_markers_tab(
                 _recording, timestamp_hms, description, category, file_path, timestamp_ms, _id = vals
                 writer.writerow([file_path, timestamp_ms, timestamp_hms, description, category])
 
+    def _export_edl() -> None:
+        selected = tree.selection()
+        if not selected:
+            messagebox.showwarning("No selection", "Select at least one row before exporting.")
+            return
+
+        live_config = config if config is not None else {}
+        initial_fps = live_config.get("last_export_fps", 60)
+        opts = _ask_edl_options(parent, initial_fps)
+        if opts is None:
+            return
+        fps, start_tc = opts
+
+        # Persist chosen fps.
+        live_config["last_export_fps"] = fps
+        save_config(live_config, config_path=config_path)
+
+        # Re-query all markers to get begin_timestamp_ms via id.
+        all_rows = query_markers(db_path=db_path)
+        rows_by_id = {r["id"]: r for r in all_rows}
+
+        # Collect selected rows and group by file_path, preserving tree order.
+        groups: dict[str, list[dict]] = defaultdict(list)
+        for item_id in selected:
+            vals = tree.item(item_id, "values")
+            # values order: recording, timestamp_hms, description, category, file_path, timestamp_ms, id
+            marker_id = int(vals[6])
+            if marker_id in rows_by_id:
+                row = rows_by_id[marker_id]
+                groups[row["file_path"]].append(row)
+
+        if len(groups) == 1:
+            (file_path, group_rows) = next(iter(groups.items()))
+            stem = Path(file_path).stem
+            out_path = filedialog.asksaveasfilename(
+                defaultextension=".edl",
+                filetypes=[("EDL files", "*.edl"), ("All files", "*.*")],
+                initialfile=f"{stem}.edl",
+                title="Export markers to DaVinci Resolve EDL",
+            )
+            if not out_path:
+                return
+            edl_text = resolve_export.markers_to_edl(group_rows, fps=fps, start_tc=start_tc, title=stem)
+            with open(out_path, "w", newline="", encoding="utf-8") as fh:
+                fh.write(edl_text)
+        else:
+            out_dir = filedialog.askdirectory(title="Select folder for EDL files")
+            if not out_dir:
+                return
+            out_dir_path = Path(out_dir)
+            written: list[str] = []
+            for file_path, group_rows in groups.items():
+                stem = Path(file_path).stem
+                # Sanitize stem for use as a filename.
+                safe_stem = "".join(c if c not in r'\/:*?"<>|' else "_" for c in stem)
+                candidate = out_dir_path / f"{safe_stem}.edl"
+                counter = 2
+                while candidate.exists():
+                    candidate = out_dir_path / f"{safe_stem} ({counter}).edl"
+                    counter += 1
+                edl_text = resolve_export.markers_to_edl(group_rows, fps=fps, start_tc=start_tc, title=stem)
+                with open(candidate, "w", newline="", encoding="utf-8") as fh:
+                    fh.write(edl_text)
+                written.append(candidate.name)
+            messagebox.showinfo(
+                "EDL Export",
+                f"Wrote {len(written)} file(s):\n" + "\n".join(written),
+            )
+
     ttk.Button(btn_frame, text="Select All", command=_select_all).pack(side="left", padx=(0, 4))
     ttk.Button(btn_frame, text="Unselect All", command=_unselect_all).pack(side="left", padx=(0, 4))
-    ttk.Button(btn_frame, text="Export to CSV", command=_export_csv).pack(side="left")
+    ttk.Button(btn_frame, text="Export to CSV", command=_export_csv).pack(side="left", padx=(0, 4))
+    ttk.Button(btn_frame, text="Export to DaVinci Resolve (.edl)", command=_export_edl).pack(side="left")
 
     # Set category row
     set_cat_combo = ttk.Combobox(set_cat_frame, textvariable=set_cat_var, state="normal", width=18)
