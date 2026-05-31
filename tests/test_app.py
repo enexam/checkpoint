@@ -194,3 +194,68 @@ def test_hotkey_callback_empty_category_does_not_save():
     append_marker.assert_called_once()
     save_cats.assert_not_called()
     assert categories == []
+
+
+# notify_fn tests
+
+def test_hotkey_callback_calls_notify_fn_when_no_snapshot():
+    """When get_snapshot() returns None and notify_fn is provided, it is called once."""
+    from checkpoint.app import _make_hotkey_callback
+    obs = _make_mock_obs(None)
+    show_popup = MagicMock()
+    append_marker = MagicMock()
+    save_cats = MagicMock()
+    notify_fn = MagicMock()
+
+    cb = _make_hotkey_callback(
+        obs, [], show_popup, append_marker, save_cats,
+        {"last_duration_preset": "30s"}, MagicMock(),
+        notify_fn=notify_fn,
+    )
+    cb()
+
+    notify_fn.assert_called_once_with("Checkpoint", "OBS is not recording")
+    show_popup.assert_not_called()
+    append_marker.assert_not_called()
+
+
+def test_hotkey_callback_no_notify_fn_no_error_when_no_snapshot():
+    """When get_snapshot() returns None and notify_fn is None, no error occurs."""
+    obs = _make_mock_obs(None)
+    show_popup = MagicMock()
+    append_marker = MagicMock()
+    save_cats = MagicMock()
+
+    cb = _make_cb(obs, [], show_popup, append_marker, save_cats)
+    cb()  # Must not raise
+
+    show_popup.assert_not_called()
+    append_marker.assert_not_called()
+
+
+# Systray menu tests
+
+def test_build_menu_contains_about_and_report_a_bug():
+    """_build_menu returns a pystray.Menu with 'About' and 'Report a Bug' items."""
+    from checkpoint.app import _build_menu
+    menu = _build_menu(MagicMock(), MagicMock(), MagicMock(), MagicMock())
+    labels = [item.text for item in menu]
+    assert "About" in labels
+    assert "Report a Bug" in labels
+
+
+def test_build_menu_item_order():
+    """_build_menu items are ordered: Open Checkpoint, About, Report a Bug, Quit."""
+    from checkpoint.app import _build_menu
+    menu = _build_menu(MagicMock(), MagicMock(), MagicMock(), MagicMock())
+    labels = [item.text for item in menu]
+    assert labels == ["Open Checkpoint", "About", "Report a Bug", "Quit"]
+
+
+def test_build_menu_default_item_is_open_checkpoint():
+    """The menu's default item (double-click action) is 'Open Checkpoint'."""
+    from checkpoint.app import _build_menu
+    menu = _build_menu(MagicMock(), MagicMock(), MagicMock(), MagicMock())
+    default_items = [item for item in menu if item.default]
+    assert len(default_items) == 1
+    assert default_items[0].text == "Open Checkpoint"

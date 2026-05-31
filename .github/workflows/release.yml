@@ -17,7 +17,20 @@ jobs:
           python-version: "3.11"
       - run: pip install -e . pytest pyinstaller
       - run: pytest tests/
-      - run: pyinstaller --onefile --windowed --name checkpoint src/checkpoint/__main__.py
+      - name: Set version from tag
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          python -c "
+          import os, re
+          tag = os.environ['TAG_NAME'].lstrip('v')
+          path = 'src/checkpoint/__init__.py'
+          content = open(path).read()
+          content = re.sub(r'__version__\s*=\s*[\"\']\S*[\"\']', f'__version__ = \"{tag}\"', content)
+          open(path, 'w').write(content)
+          print('Version set to', tag)
+          "
+      - run: pyinstaller checkpoint.spec
       - uses: softprops/action-gh-release@v2
         with:
           files: dist/checkpoint.exe

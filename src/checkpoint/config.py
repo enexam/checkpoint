@@ -12,6 +12,7 @@ _DEFAULTS: dict = {
     "obs_password": "",
     "hotkey": "ctrl+f9",
     "last_duration_preset": "30s",
+    "last_export_fps": 60,
 }
 
 

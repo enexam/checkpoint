@@ -1,25 +1,26 @@
-"""Main application window with Settings and Markers tabs."""
-import csv
+"""Main application window with Markers, Settings, and About tabs."""
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
+from tkinter import messagebox, ttk
 from pathlib import Path
 from typing import Any, Callable
 
 from checkpoint.categories import load_categories, save_categories
 from checkpoint.config import save_config
-from checkpoint.storage import list_categories, list_recordings, query_markers, update_markers_category
+from checkpoint import about
+from checkpoint.clip_explorer import ClipsTab
+from checkpoint.resources import set_window_icon
 
 # Module-level reference to the single open window instance (None when closed).
 _window: tk.Toplevel | None = None
 
-# Refresh callback for the Markers tab; set when the tab is built, cleared on close.
-_refresh_fn: Callable | None = None
+# Reference to the embedded ClipsTab; set when opened, cleared on close.
+_clips_tab: ClipsTab | None = None
 
 
 def notify_new_marker() -> None:
     """Refresh the Markers tab if the main window is currently open."""
-    if _refresh_fn is not None:
-        _refresh_fn()
+    if _clips_tab is not None and _clips_tab.winfo_exists():
+        _clips_tab.load_markers()
 
 
 def open_main_window(
@@ -32,6 +33,7 @@ def open_main_window(
     config_path: Path | None = None,
     db_path: Path | None = None,
     on_quit: Callable | None = None,
+    initial_tab: str | None = None,
 ) -> None:
     """Open the main Checkpoint window, or raise it if already open.
 
@@ -51,6 +53,9 @@ def open_main_window(
         Optional override for the config.json path (used in tests).
     db_path:
         Optional override for the markers.db path (used in tests).
+    initial_tab:
+        If not None, selects the notebook tab whose text matches this string after
+        all tabs are built. Used by systray menu items to open directly to a tab.
     """
     global _window
 
@@ -64,18 +69,29 @@ def open_main_window(
     win = tk.Toplevel(root)
     win.title("Checkpoint")
     win.resizable(True, True)
+    set_window_icon(win)
     _window = win
 
     def _on_close() -> None:
-        global _window, _refresh_fn
+        global _window, _clips_tab
+        if _clips_tab is not None:
+            try:
+                _clips_tab.teardown()
+            except Exception:
+                pass
+            _clips_tab = None
         _window = None
-        _refresh_fn = None
         win.destroy()
 
     win.protocol("WM_DELETE_WINDOW", _on_close)
 
     notebook = ttk.Notebook(win)
     notebook.pack(fill="both", expand=True, padx=8, pady=8)
+
+    # --- Markers tab (first) ---
+    global _clips_tab
+    _clips_tab = ClipsTab(notebook, db_path=db_path, config=config, config_path=config_path)
+    notebook.add(_clips_tab, text="Markers")
 
     # --- Settings tab ---
     settings_frame = ttk.Frame(notebook)
@@ -91,10 +107,17 @@ def open_main_window(
         config_path=config_path,
     )
 
-    # --- Markers tab ---
-    markers_frame = ttk.Frame(notebook)
-    notebook.add(markers_frame, text="Markers")
-    _build_markers_tab(markers_frame, db_path=db_path)
+    # --- About tab ---
+    about_frame = ttk.Frame(notebook)
+    notebook.add(about_frame, text="About")
+    about.build_about_tab(about_frame)
+
+    # Select initial tab if requested.
+    if initial_tab is not None:
+        for tab_id in notebook.tabs():
+            if notebook.tab(tab_id, "text") == initial_tab:
+                notebook.select(tab_id)
+                break
 
     # --- Bottom bar ---
     bottom_frame = ttk.Frame(win)
@@ -232,161 +255,3 @@ def _build_settings_tab(
         new_cat_var.set("")
 
     ttk.Button(add_frame, text="Add", command=_add_category).pack(side="left")
-
-
-def _build_markers_tab(
-    parent: ttk.Frame,
-    db_path: Path | None,
-) -> None:
-    """Populate the Markers tab with filter row, Treeview, and action buttons."""
-
-    # ------------------------------------------------------------------ #
-    # Filter row
-    # ------------------------------------------------------------------ #
-    filter_frame = ttk.Frame(parent)
-    filter_frame.pack(fill="x", padx=8, pady=8)
-
-    ttk.Label(filter_frame, text="Recording:").pack(side="left", padx=(0, 4))
-    recording_var = tk.StringVar(value="All")
-    recording_combo = ttk.Combobox(filter_frame, textvariable=recording_var, state="readonly", width=30)
-    recording_combo.pack(side="left", padx=(0, 8))
-
-    ttk.Label(filter_frame, text="Category:").pack(side="left", padx=(0, 4))
-    category_var = tk.StringVar(value="All")
-    category_combo = ttk.Combobox(filter_frame, textvariable=category_var, state="readonly", width=20)
-    category_combo.pack(side="left", padx=(0, 8))
-
-    # ------------------------------------------------------------------ #
-    # Treeview - file_path is a hidden column used for export
-    # ------------------------------------------------------------------ #
-    tree_frame = ttk.Frame(parent)
-    tree_frame.pack(fill="both", expand=True, padx=8, pady=(0, 4))
-
-    tree = ttk.Treeview(
-        tree_frame,
-        columns=("recording", "timestamp", "description", "category", "file_path", "timestamp_ms", "id"),
-        displaycolumns=("recording", "timestamp", "description", "category"),
-        show="headings",
-        selectmode="extended",
-    )
-    tree.heading("recording", text="Recording")
-    tree.heading("timestamp", text="Timestamp")
-    tree.heading("description", text="Description")
-    tree.heading("category", text="Category")
-
-    scrollbar = ttk.Scrollbar(tree_frame, orient="vertical", command=tree.yview)
-    tree.configure(yscrollcommand=scrollbar.set)
-    tree.pack(side="left", fill="both", expand=True)
-    scrollbar.pack(side="right", fill="y")
-
-    # ------------------------------------------------------------------ #
-    # Button rows
-    # ------------------------------------------------------------------ #
-    btn_frame = ttk.Frame(parent)
-    btn_frame.pack(fill="x", padx=8, pady=(0, 2))
-
-    set_cat_frame = ttk.Frame(parent)
-    set_cat_frame.pack(fill="x", padx=8, pady=(0, 8))
-
-    set_cat_var = tk.StringVar()
-
-    def _refresh() -> None:
-        """Reload dropdowns and repopulate the Treeview from the DB."""
-        # Rebuild recording dropdown.
-        recordings = list_recordings(db_path=db_path)
-        recording_combo["values"] = ["All"] + recordings
-
-        # Rebuild category dropdown.
-        categories = list_categories(db_path=db_path)
-        category_combo["values"] = ["All"] + categories
-
-        # Determine filter values.
-        rec_filter = recording_var.get()
-        file_path_filter: str | None = None if rec_filter == "All" else rec_filter
-
-        cat_filter = category_var.get()
-        category_filter: str | None = None if cat_filter == "All" else cat_filter
-
-        # Rebuild set-category combobox values.
-        set_cat_combo["values"] = categories
-
-        # Repopulate Treeview.
-        tree.delete(*tree.get_children())
-        for row in query_markers(file_path=file_path_filter, category=category_filter, db_path=db_path):
-            basename = Path(row["file_path"]).name
-            tree.insert(
-                "",
-                "end",
-                values=(
-                    basename,
-                    row["timestamp_hms"],
-                    row["description"],
-                    row["category"],
-                    row["file_path"],
-                    row["timestamp_ms"],
-                    row["id"],
-                ),
-            )
-
-    ttk.Button(filter_frame, text="Refresh", command=_refresh).pack(side="left")
-
-    recording_combo.bind("<<ComboboxSelected>>", lambda _e: _refresh())
-    category_combo.bind("<<ComboboxSelected>>", lambda _e: _refresh())
-
-    def _select_all() -> None:
-        tree.selection_set(tree.get_children())
-
-    def _unselect_all() -> None:
-        tree.selection_set([])
-
-    def _export_csv() -> None:
-        selected = tree.selection()
-        if not selected:
-            messagebox.showwarning("No selection", "Select at least one row before exporting.")
-            return
-
-        out_path = filedialog.asksaveasfilename(
-            defaultextension=".csv",
-            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
-            title="Export markers to CSV",
-        )
-        if not out_path:
-            return
-
-        with open(out_path, "w", newline="", encoding="utf-8") as fh:
-            writer = csv.writer(fh)
-            writer.writerow(["file_path", "timestamp_ms", "timestamp_hms", "description", "category"])
-            for item_id in selected:
-                vals = tree.item(item_id, "values")
-                # values order: recording(basename), timestamp_hms, description, category, file_path, timestamp_ms, id
-                _recording, timestamp_hms, description, category, file_path, timestamp_ms, _id = vals
-                writer.writerow([file_path, timestamp_ms, timestamp_hms, description, category])
-
-    ttk.Button(btn_frame, text="Select All", command=_select_all).pack(side="left", padx=(0, 4))
-    ttk.Button(btn_frame, text="Unselect All", command=_unselect_all).pack(side="left", padx=(0, 4))
-    ttk.Button(btn_frame, text="Export to CSV", command=_export_csv).pack(side="left")
-
-    # Set category row
-    set_cat_combo = ttk.Combobox(set_cat_frame, textvariable=set_cat_var, state="normal", width=18)
-
-    def _set_category() -> None:
-        selected = tree.selection()
-        if not selected:
-            messagebox.showwarning("No selection", "Select at least one row before setting a category.")
-            return
-        cat = set_cat_var.get().strip()
-        if not cat:
-            messagebox.showwarning("No category", "Enter or select a category first.")
-            return
-        ids = [int(tree.item(item_id, "values")[6]) for item_id in selected]
-        update_markers_category(ids, cat, db_path=db_path)
-        _refresh()
-
-    ttk.Label(set_cat_frame, text="Set category:").pack(side="left", padx=(0, 4))
-    set_cat_combo.pack(side="left", padx=(0, 4))
-    ttk.Button(set_cat_frame, text="Set for Selection", command=_set_category).pack(side="left")
-
-    # Register for new-marker notifications and populate on open.
-    global _refresh_fn
-    _refresh_fn = _refresh
-    _refresh()

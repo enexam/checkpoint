@@ -13,11 +13,11 @@ import pystray
 from PIL import Image, ImageDraw, ImageFont
 
 from checkpoint.categories import load_categories, save_categories
-from checkpoint.clip_explorer import notify_new_marker as _notify_clip_explorer, open_clip_explorer
 from checkpoint.config import load_config, save_config
 from checkpoint.obs_client import ObsClient
 from checkpoint.popup import show_popup
 from checkpoint.main_window import notify_new_marker as _notify_main_window, open_main_window
+from checkpoint.resources import icon_png_path
 from checkpoint.storage import append_marker, init_db
 
 _WM_HOTKEY = 0x0312
@@ -97,6 +97,9 @@ class _HotkeyListener:
 
 
 def _make_icon_image() -> Image.Image:
+    png = icon_png_path()
+    if png.exists():
+        return Image.open(png).convert("RGBA").resize((64, 64))
     img = Image.new("RGBA", (64, 64), color=(0x1A, 0x1A, 0x2E, 255))
     draw = ImageDraw.Draw(img)
     try:
@@ -117,6 +120,14 @@ def _preset_string(duration_hint_ms: int) -> str:
     return _canonical.get(duration_hint_ms, f"custom:{duration_hint_ms // 1000}")
 
 
+def _safe_notify(icon: pystray.Icon, title: str, msg: str) -> None:
+    """Call icon.notify(msg, title), ignoring backends that don't support it."""
+    try:
+        icon.notify(msg, title)
+    except Exception:
+        logging.debug("icon.notify not supported on this backend")
+
+
 def _make_hotkey_callback(
     obs: ObsClient,
     categories: list[str],
@@ -125,12 +136,15 @@ def _make_hotkey_callback(
     save_cats_fn: Callable,
     config: dict,
     save_config_fn: Callable,
+    notify_fn: Callable | None = None,
 ) -> Callable:
     def _on_hotkey() -> None:
         logging.debug("hotkey fired")
         snapshot = obs.get_snapshot()
         if snapshot is None:
             logging.debug("OBS not recording - skipping")
+            if notify_fn is not None:
+                notify_fn("Checkpoint", "OBS is not recording")
             return
         logging.debug("OBS recording: %s @ %d ms", snapshot["file_path"], snapshot["timestamp_ms"])
         initial_preset = config.get("last_duration_preset", "30s")
@@ -153,6 +167,21 @@ def _make_hotkey_callback(
             save_cats_fn(categories)
 
     return _on_hotkey
+
+
+def _build_menu(
+    on_open: Callable,
+    on_about: Callable,
+    on_report: Callable,
+    on_quit: Callable,
+) -> pystray.Menu:
+    """Build the systray menu."""
+    return pystray.Menu(
+        pystray.MenuItem("Open Checkpoint", on_open, default=True),
+        pystray.MenuItem("About", on_about),
+        pystray.MenuItem("Report a Bug", on_report),
+        pystray.MenuItem("Quit", on_quit),
+    )
 
 
 def _setup_logging() -> None:
@@ -188,7 +217,6 @@ def main() -> None:
 
     hotkey_str = config.get("hotkey", "ctrl+f9")
     logging.info("registering hotkey: %s", hotkey_str)
-    callback = _make_hotkey_callback(obs, categories, show_popup, append_marker, save_categories, config, save_config)
 
     def _on_hotkey() -> None:
         pending.put(True)
@@ -202,8 +230,17 @@ def main() -> None:
             root.quit()
         root.after(0, lambda: open_main_window(root, config, listener, obs, categories=categories, on_quit=_quit_app))
 
-    def _open_explorer(icon: pystray.Icon, _item: object) -> None:
-        root.after(0, lambda: open_clip_explorer(root))
+    def _open_about(icon: pystray.Icon, _item: object) -> None:
+        def _quit_app() -> None:
+            icon.stop()
+            root.quit()
+        root.after(0, lambda: open_main_window(root, config, listener, obs, categories=categories, on_quit=_quit_app, initial_tab="About"))
+
+    def _open_report(icon: pystray.Icon, _item: object) -> None:
+        def _quit_app() -> None:
+            icon.stop()
+            root.quit()
+        root.after(0, lambda: open_main_window(root, config, listener, obs, categories=categories, on_quit=_quit_app, initial_tab="About"))
 
     def _quit(icon: pystray.Icon, _item: object) -> None:
         icon.stop()
@@ -213,11 +250,12 @@ def main() -> None:
         "Checkpoint",
         _make_icon_image(),
         title="Checkpoint",
-        menu=pystray.Menu(
-            pystray.MenuItem("Open Checkpoint", _open),
-            pystray.MenuItem("Open Clip Explorer", _open_explorer),
-            pystray.MenuItem("Quit", _quit),
-        ),
+        menu=_build_menu(_open, _open_about, _open_report, _quit),
+    )
+
+    callback = _make_hotkey_callback(
+        obs, categories, show_popup, append_marker, save_categories, config, save_config,
+        notify_fn=lambda title, msg: _safe_notify(icon, title, msg),
     )
 
     def _poll() -> None:
@@ -225,7 +263,6 @@ def main() -> None:
             pending.get_nowait()
             callback()
             _notify_main_window()
-            _notify_clip_explorer()
         except _queue.Empty:
             pass
         root.after(50, _poll)
