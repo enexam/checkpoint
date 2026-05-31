@@ -149,6 +149,7 @@ class ClipsTab(ttk.Frame):
         self._player: Any = None
         self._seeking: bool = False
         self._selected_file_path: str = ""
+        self._drag_anchor: str = ""
 
         self._build_ui()
         self.load_markers()
@@ -256,6 +257,8 @@ class ClipsTab(ttk.Frame):
         self._tree.bind("<Shift-Left>", lambda e: self._on_arrow_key(e, -1))
         self._tree.bind("<Shift-Right>", lambda e: self._on_arrow_key(e, +1))
         self._tree.bind("<Delete>", self._on_delete_key)
+        self._tree.bind("<ButtonPress-1>", self._on_b1_press, add="+")
+        self._tree.bind("<B1-Motion>", self._on_b1_motion, add="+")
 
         # Batch action row
         btn_frame = ttk.Frame(parent)
@@ -336,6 +339,13 @@ class ClipsTab(ttk.Frame):
 
         self._saved_label = tk.Label(ctrl_frame, text="", foreground="green")
         self._saved_label.pack(side="left", padx=8)
+
+        self._audio_note = ttk.Label(
+            parent,
+            text="Preview plays one audio track only — your recording still contains all recorded tracks.",
+            foreground="gray",
+        )
+        self._audio_note.pack(padx=4, pady=(0, 4))
 
     # ------------------------------------------------------------------
     # Data loading
@@ -466,6 +476,26 @@ class ClipsTab(ttk.Frame):
 
         if VLC_AVAILABLE and self._player is not None:
             self._load_media(file_path)
+
+    def _on_b1_press(self, event: Any) -> None:
+        """Record the drag anchor row on mouse button press."""
+        self._drag_anchor = self._tree.identify_row(event.y)
+
+    def _on_b1_motion(self, event: Any) -> None:
+        """Extend the selection to the contiguous range between anchor and cursor."""
+        if not self._drag_anchor:
+            return
+        row = self._tree.identify_row(event.y)
+        if not row:
+            return
+        children = list(self._tree.get_children())
+        try:
+            i0 = children.index(self._drag_anchor)
+            i1 = children.index(row)
+        except ValueError:
+            return
+        lo, hi = sorted((i0, i1))
+        self._tree.selection_set(children[lo:hi + 1])
 
     def _refresh_boundary_entries(self) -> None:
         self._begin_var.set(storage._ms_to_hms(self._begin_ms))

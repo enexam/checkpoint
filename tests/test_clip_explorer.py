@@ -1272,3 +1272,72 @@ def test_teardown_no_error_without_player(tk_root, db_path):
     """teardown() does not raise when no VLC player is active."""
     tab = _make_tab(tk_root, db_path)
     tab.teardown()  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# Click-drag range selection
+# ---------------------------------------------------------------------------
+
+def test_drag_selects_contiguous_range(tk_root, db_path):
+    """Press-and-drag selects the contiguous range from anchor to cursor row."""
+    _insert_marker(db_path, "C:/rec.mkv", 10_000, 0, "A", "x")
+    _insert_marker(db_path, "C:/rec.mkv", 20_000, 0, "B", "x")
+    _insert_marker(db_path, "C:/rec.mkv", 30_000, 0, "C", "x")
+
+    tab = _make_tab(tk_root, db_path)
+    children = tab._tree.get_children()
+    # Monkeypatch identify_row: treat y as a direct index into children.
+    tab._tree.identify_row = lambda y: children[y] if 0 <= y < len(children) else ""
+
+    class _Ev:
+        def __init__(self, y):
+            self.y = y
+
+    # Press at row 0, drag to row 2 — should select rows 0, 1, 2.
+    tab._on_b1_press(_Ev(0))
+    tab._on_b1_motion(_Ev(2))
+    assert set(tab._tree.selection()) == set(children[0:3])
+    tab.teardown()
+
+
+def test_drag_reverse_direction_selects_range(tk_root, db_path):
+    """Drag from a lower row up to a higher row also selects the full range."""
+    _insert_marker(db_path, "C:/rec.mkv", 10_000, 0, "A", "x")
+    _insert_marker(db_path, "C:/rec.mkv", 20_000, 0, "B", "x")
+    _insert_marker(db_path, "C:/rec.mkv", 30_000, 0, "C", "x")
+
+    tab = _make_tab(tk_root, db_path)
+    children = tab._tree.get_children()
+    tab._tree.identify_row = lambda y: children[y] if 0 <= y < len(children) else ""
+
+    class _Ev:
+        def __init__(self, y):
+            self.y = y
+
+    # Press at row 2, drag to row 0 — should still select rows 0, 1, 2.
+    tab._on_b1_press(_Ev(2))
+    tab._on_b1_motion(_Ev(0))
+    assert set(tab._tree.selection()) == set(children[0:3])
+    tab.teardown()
+
+
+# ---------------------------------------------------------------------------
+# Audio annotation label
+# ---------------------------------------------------------------------------
+
+def test_audio_annotation_label_present(tk_root, db_path):
+    """The audio annotation label exists with the exact specified text."""
+    _EXPECTED = (
+        "Preview plays one audio track only — "
+        "your recording still contains all recorded tracks."
+    )
+    tab = _make_tab(tk_root, db_path)
+    assert tab._audio_note.cget("text") == _EXPECTED
+    tab.teardown()
+
+
+def test_audio_annotation_label_foreground_gray(tk_root, db_path):
+    """The audio annotation label has gray foreground."""
+    tab = _make_tab(tk_root, db_path)
+    assert str(tab._audio_note.cget("foreground")) == "gray"
+    tab.teardown()
