@@ -238,15 +238,15 @@ def test_hotkey_callback_no_notify_fn_no_error_when_no_snapshot():
 def test_build_menu_contains_about_and_report_a_bug():
     """_build_menu returns a pystray.Menu with 'About' and 'Report a Bug' items."""
     from checkpoint.app import _build_menu
-    menu = _build_menu(MagicMock(), MagicMock(), MagicMock(), MagicMock(), MagicMock())
+    menu = _build_menu(MagicMock(), MagicMock(), MagicMock(), MagicMock())
     labels = [item.text for item in menu]
     assert "About" in labels
     assert "Report a Bug" in labels
 
 
 def test_build_menu_item_order():
-    """_build_menu items are ordered: Open Checkpoint, Open Clip Explorer, About, Report a Bug, Quit."""
+    """_build_menu items are ordered: Open Checkpoint, About, Report a Bug, Quit."""
     from checkpoint.app import _build_menu
-    menu = _build_menu(MagicMock(), MagicMock(), MagicMock(), MagicMock(), MagicMock())
+    menu = _build_menu(MagicMock(), MagicMock(), MagicMock(), MagicMock())
     labels = [item.text for item in menu]
-    assert labels == ["Open Checkpoint", "Open Clip Explorer", "About", "Report a Bug", "Quit"]
+    assert labels == ["Open Checkpoint", "About", "Report a Bug", "Quit"]

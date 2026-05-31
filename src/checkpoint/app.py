@@ -13,7 +13,6 @@ import pystray
 from PIL import Image, ImageDraw, ImageFont
 
 from checkpoint.categories import load_categories, save_categories
-from checkpoint.clip_explorer import notify_new_marker as _notify_clip_explorer, open_clip_explorer
 from checkpoint.config import load_config, save_config
 from checkpoint.obs_client import ObsClient
 from checkpoint.popup import show_popup
@@ -172,7 +171,6 @@ def _make_hotkey_callback(
 
 def _build_menu(
     on_open: Callable,
-    on_explorer: Callable,
     on_about: Callable,
     on_report: Callable,
     on_quit: Callable,
@@ -180,7 +178,6 @@ def _build_menu(
     """Build the systray menu."""
     return pystray.Menu(
         pystray.MenuItem("Open Checkpoint", on_open),
-        pystray.MenuItem("Open Clip Explorer", on_explorer),
         pystray.MenuItem("About", on_about),
         pystray.MenuItem("Report a Bug", on_report),
         pystray.MenuItem("Quit", on_quit),
@@ -233,9 +230,6 @@ def main() -> None:
             root.quit()
         root.after(0, lambda: open_main_window(root, config, listener, obs, categories=categories, on_quit=_quit_app))
 
-    def _open_explorer(icon: pystray.Icon, _item: object) -> None:
-        root.after(0, lambda: open_clip_explorer(root))
-
     def _open_about(icon: pystray.Icon, _item: object) -> None:
         def _quit_app() -> None:
             icon.stop()
@@ -256,7 +250,7 @@ def main() -> None:
         "Checkpoint",
         _make_icon_image(),
         title="Checkpoint",
-        menu=_build_menu(_open, _open_explorer, _open_about, _open_report, _quit),
+        menu=_build_menu(_open, _open_about, _open_report, _quit),
     )
 
     callback = _make_hotkey_callback(
@@ -269,7 +263,6 @@ def main() -> None:
             pending.get_nowait()
             callback()
             _notify_main_window()
-            _notify_clip_explorer()
         except _queue.Empty:
             pass
         root.after(50, _poll)
