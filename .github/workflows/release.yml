@@ -20,6 +20,7 @@ jobs:
       - name: Set version from tag
         env:
           TAG_NAME: ${{ github.ref_name }}
+        shell: bash
         run: |
           python -c "
           import os, re
