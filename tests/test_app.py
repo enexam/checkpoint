@@ -250,3 +250,12 @@ def test_build_menu_item_order():
     menu = _build_menu(MagicMock(), MagicMock(), MagicMock(), MagicMock())
     labels = [item.text for item in menu]
     assert labels == ["Open Checkpoint", "About", "Report a Bug", "Quit"]
+
+
+def test_build_menu_default_item_is_open_checkpoint():
+    """The menu's default item (double-click action) is 'Open Checkpoint'."""
+    from checkpoint.app import _build_menu
+    menu = _build_menu(MagicMock(), MagicMock(), MagicMock(), MagicMock())
+    default_items = [item for item in menu if item.default]
+    assert len(default_items) == 1
+    assert default_items[0].text == "Open Checkpoint"

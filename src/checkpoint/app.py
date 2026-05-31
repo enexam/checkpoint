@@ -177,7 +177,7 @@ def _build_menu(
 ) -> pystray.Menu:
     """Build the systray menu."""
     return pystray.Menu(
-        pystray.MenuItem("Open Checkpoint", on_open),
+        pystray.MenuItem("Open Checkpoint", on_open, default=True),
         pystray.MenuItem("About", on_about),
         pystray.MenuItem("Report a Bug", on_report),
         pystray.MenuItem("Quit", on_quit),
