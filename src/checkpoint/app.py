@@ -270,6 +270,12 @@ def main() -> None:
     logging.info("systray running")
     root.after(50, _poll)
     icon.run_detached()
+
+    def _quit_app() -> None:
+        icon.stop()
+        root.quit()
+    root.after(0, lambda: open_main_window(root, config, listener, obs, categories=categories, on_quit=_quit_app))
+
     root.mainloop()
 
     listener.stop()
